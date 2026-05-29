@@ -1,0 +1,17 @@
+# Build artifacts
+bin/
+dist/
+*.test
+
+# Test artifacts
+coverage.out
+
+# Local environment (never commit secrets)
+.env
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Scratch
+tmp/

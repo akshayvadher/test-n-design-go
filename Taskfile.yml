@@ -1,0 +1,146 @@
+# Taskfile for the test-n-design-go (improving-tdd-demo) Go port.
+# Run with `task <name>`. See https://taskfile.dev for syntax.
+#
+# -----------------------------------------------------------------------------
+# Windows + podman gotcha (testcontainers-go socket discovery)
+# -----------------------------------------------------------------------------
+# testcontainers-go locates the container engine via the DOCKER_HOST env var.
+# On Windows with podman, the value is the named pipe of your podman machine,
+# typically:
+#
+#   DOCKER_HOST=npipe:////./pipe/podman-machine-default
+#
+# To discover the exact value for your machine, run:
+#
+#   podman machine inspect | jq -r '.[].ConnectionInfo.PodmanPipe.Path'
+#
+# Set DOCKER_HOST in your shell (or .env consumed by your terminal) BEFORE
+# running `task test:integration`, otherwise the testcontainers helpers will
+# fail with "Cannot connect to the Docker daemon".
+#
+# On Linux:   DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock
+# On macOS:   DOCKER_HOST=$(podman machine inspect | jq -r '.[].ConnectionInfo.PodmanSocket.Path')
+# -----------------------------------------------------------------------------
+#
+# Healthcheck wait strategy for `task up`:
+# We poll `podman compose ps --format json` until every service reports
+# `Health == "healthy"`. This is portable across podman-compose versions that
+# do not support docker-compose's `--wait` flag.
+# -----------------------------------------------------------------------------
+
+version: '3'
+
+vars:
+  BINARY_NAME: library
+  BIN_DIR: bin
+  CMD_PKG: ./cmd/library
+  HEALTH_TIMEOUT_SECONDS: 60
+
+tasks:
+  up:
+    desc: Start postgres + redis via podman compose and wait until both are healthy.
+    cmds:
+      - podman compose up -d
+      - task: wait-healthy
+
+  wait-healthy:
+    internal: true
+    desc: Poll podman compose until every service reports healthy.
+    cmds:
+      - cmd: |
+          pwsh -NoProfile -Command "
+          $deadline = (Get-Date).AddSeconds({{.HEALTH_TIMEOUT_SECONDS}});
+          while ((Get-Date) -lt $deadline) {
+            $raw = podman compose ps --format json 2>$null;
+            if ($LASTEXITCODE -eq 0 -and $raw) {
+              try { $services = $raw | ConvertFrom-Json } catch { $services = @() };
+              if ($services -isnot [array]) { $services = @($services) };
+              if ($services.Count -ge 2) {
+                $healthy = $services | Where-Object { $_.Health -eq 'healthy' };
+                if ($healthy.Count -eq $services.Count) {
+                  Write-Host 'all services healthy';
+                  exit 0;
+                }
+              }
+            }
+            Start-Sleep -Seconds 2;
+          }
+          Write-Error 'timed out waiting for compose services to become healthy';
+          exit 1;
+          "
+        platforms: [windows]
+      - cmd: |
+          deadline=$(( $(date +%s) + {{.HEALTH_TIMEOUT_SECONDS}} ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            status=$(podman compose ps --format json 2>/dev/null || echo '[]')
+            count=$(printf '%s' "$status" | jq 'length')
+            healthy=$(printf '%s' "$status" | jq '[.[] | select(.Health == "healthy")] | length')
+            if [ "$count" -ge 2 ] && [ "$count" = "$healthy" ]; then
+              echo "all services healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "timed out waiting for compose services to become healthy" >&2
+          exit 1
+        platforms: [linux, darwin]
+
+  down:
+    desc: Stop postgres + redis. Data volume is preserved.
+    cmds:
+      - podman compose down
+
+  down:clean:
+    desc: Stop postgres + redis AND delete the data volume. Destructive.
+    cmds:
+      - podman compose down -v
+
+  run:
+    desc: Run the library server in the foreground (Ctrl-C to stop).
+    cmds:
+      - go run {{.CMD_PKG}}
+
+  build:
+    desc: Build the library binary into ./bin/.
+    cmds:
+      - cmd: go build -o {{.BIN_DIR}}/{{.BINARY_NAME}}.exe {{.CMD_PKG}}
+        platforms: [windows]
+      - cmd: go build -o {{.BIN_DIR}}/{{.BINARY_NAME}} {{.CMD_PKG}}
+        platforms: [linux, darwin]
+
+  test:
+    desc: Run the unit test suite (no build tags, no containers, no network).
+    cmds:
+      - go test -race ./...
+
+  test:integration:
+    desc: Run the integration test suite (testcontainers postgres + redis).
+    cmds:
+      - go test -race -tags=integration ./...
+
+  migrate:apply:
+    desc: Apply pending atlas migrations to the dev postgres.
+    cmds:
+      - atlas migrate apply --env local
+
+  migrate:status:
+    desc: Show atlas migration status for the dev postgres.
+    cmds:
+      - atlas migrate status --env local
+
+  fmt:
+    desc: Format Go sources and tidy module deps.
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+
+  lint:
+    desc: Run go vet across the module. (No golangci-lint dependency in Phase 1.)
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Tidy module deps and verify module checksums.
+    cmds:
+      - go mod tidy
+      - go mod verify
