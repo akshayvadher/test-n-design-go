@@ -79,17 +79,17 @@ Brings the repository to "I can run `task run` and `curl localhost:3000/healthz`
 
 #### Acceptance Criteria
 
-- [ ] `cmd/library/config.go` exports a `Config` struct with fields for HTTP port (`int`), database URL (`string`), redis URL (`string`), log level (`string`), log format (`string`).
-- [ ] `cmd/library/config.go` exports `LoadConfig() (*Config, error)` that reads from env via viper, applies the defaults documented in `.env.example`, and returns an error if any required field is missing or unparseable.
-- [ ] `LoadConfig` reads `.env` if present (viper `AutomaticEnv` + `SetEnvPrefix("LIBRARY")`); explicit env vars override `.env` values.
-- [ ] `LoadConfig` returns an error mentioning the offending field name when the port is non-numeric, when the log level is not one of `debug|info|warn|error`, or when the log format is not `json|text`.
-- [ ] `cmd/library/main.go`'s `main` function: loads config, builds a `*slog.Logger` (JSON or text handler per `LIBRARY_LOG_FORMAT`, level per `LIBRARY_LOG_LEVEL`), builds the chi router with the locked middleware stack (see Slice 4), registers `GET /healthz`, builds an `http.Server` with `ReadHeaderTimeout: 5*time.Second`, starts the server, and blocks until SIGINT or SIGTERM.
-- [ ] On SIGINT/SIGTERM, `main` calls `http.Server.Shutdown(ctx)` with a 10-second timeout. If `Shutdown` returns an error, `main` logs the error at level `error` and exits with code 1; on clean shutdown it logs `server stopped` at level `info` and exits 0.
-- [ ] `GET /healthz` returns HTTP 200 with `Content-Type: application/json` and exact body `{"status":"ok"}` (no whitespace, no trailing newline difference beyond what `json.Encoder` emits — the AC is byte-identical to `{"status":"ok"}` after `bytes.TrimSpace`).
-- [ ] `main.go` does not call `os.Exit` directly except in the shutdown-error branch and the config-error branch; clean paths return from `main` normally.
-- [ ] `main.go` does not contain any `init()` function. All wiring is sequential inside `main` (per Decision D4 + the "No `init()` for module wiring" rule).
-- [ ] The composition root creates a single `*slog.Logger` and passes it explicitly into every collaborator that logs (no `slog.Default()` reads from inside business code).
-- [ ] `main.go` writes the listening port to the logger at level `info` exactly once (`server listening`, with structured field `port`).
+- [x] `cmd/library/config.go` exports a `Config` struct with fields for HTTP port (`int`), database URL (`string`), redis URL (`string`), log level (`string`), log format (`string`).
+- [x] `cmd/library/config.go` exports `LoadConfig() (*Config, error)` that reads from env via viper, applies the defaults documented in `.env.example`, and returns an error if any required field is missing or unparseable.
+- [x] `LoadConfig` reads `.env` if present (viper `AutomaticEnv` + `SetEnvPrefix("LIBRARY")`); explicit env vars override `.env` values.
+- [x] `LoadConfig` returns an error mentioning the offending field name when the port is non-numeric, when the log level is not one of `debug|info|warn|error`, or when the log format is not `json|text`.
+- [x] `cmd/library/main.go`'s `main` function: loads config, builds a `*slog.Logger` (JSON or text handler per `LIBRARY_LOG_FORMAT`, level per `LIBRARY_LOG_LEVEL`), builds the chi router with the locked middleware stack (see Slice 4), registers `GET /healthz`, builds an `http.Server` with `ReadHeaderTimeout: 5*time.Second`, starts the server, and blocks until SIGINT or SIGTERM.
+- [x] On SIGINT/SIGTERM, `main` calls `http.Server.Shutdown(ctx)` with a 10-second timeout. If `Shutdown` returns an error, `main` logs the error at level `error` and exits with code 1; on clean shutdown it logs `server stopped` at level `info` and exits 0.
+- [x] `GET /healthz` returns HTTP 200 with `Content-Type: application/json` and exact body `{"status":"ok"}` (no whitespace, no trailing newline difference beyond what `json.Encoder` emits — the AC is byte-identical to `{"status":"ok"}` after `bytes.TrimSpace`).
+- [x] `main.go` does not call `os.Exit` directly except in the shutdown-error branch and the config-error branch; clean paths return from `main` normally.
+- [x] `main.go` does not contain any `init()` function. All wiring is sequential inside `main` (per Decision D4 + the "No `init()` for module wiring" rule).
+- [x] The composition root creates a single `*slog.Logger` and passes it explicitly into every collaborator that logs (no `slog.Default()` reads from inside business code).
+- [x] `main.go` writes the listening port to the logger at level `info` exactly once (`server listening`, with structured field `port`).
 
 ---
 
