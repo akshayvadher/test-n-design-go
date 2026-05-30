@@ -25,7 +25,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+
+	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 )
 
 // readHeaderTimeout caps the time the HTTP server waits for request headers.
@@ -50,7 +51,11 @@ func main() {
 	}
 
 	logger := buildLogger(cfg, os.Stdout)
-	router := buildRouter()
+	registry := sharedhttp.NewDomainErrorRegistry()
+	// Phase 1 ships an empty registry — every handler error collapses to
+	// 500/internal_error. Slice 6 lands accesscontrol and the registration
+	// block (UnauthorizedRoleError, UnknownActionError) below.
+	router := buildRouter(logger, registry)
 	server := buildServer(cfg.HTTPPort, router)
 
 	if err := runServer(server, cfg.HTTPPort, logger); err != nil {
@@ -90,20 +95,20 @@ func parseLogLevel(level string) slog.Level {
 	}
 }
 
-// buildRouter wires the chi router with the Phase-1 middleware stack and
-// registers the routes owned by the binary itself (currently just /healthz).
+// buildRouter wires the chi router with the locked Phase-1 middleware stack
+// (RequestID → RealIP → slog-adapter Logger → Recoverer → DomainErrorMiddleware)
+// and registers the routes owned by the binary itself (currently just /healthz).
 //
-// Slice 4 will introduce internal/shared/http.Middlewares(logger) (a slog
-// adapter, plus DomainErrorMiddleware). This slice deliberately uses chi's
-// built-in RequestID, RealIP, Logger, and Recoverer so the binary is runnable
-// end-to-end before Slice 4 lands. Slice 4 will refactor this function to
-// take *slog.Logger and delegate to the shared helper.
-func buildRouter() chi.Router {
+// The middleware stack is constructed by internal/shared/http.Middlewares so
+// every binary uses the same chain. DomainErrorMiddleware is appended
+// separately because it needs the registry; Middlewares stays a pure
+// (logger) → []middleware function.
+func buildRouter(logger *slog.Logger, registry *sharedhttp.DomainErrorRegistry) chi.Router {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	for _, m := range sharedhttp.Middlewares(logger) {
+		r.Use(m)
+	}
+	r.Use(sharedhttp.DomainErrorMiddleware(registry, logger))
 
 	r.Get("/healthz", healthzHandler)
 	return r
