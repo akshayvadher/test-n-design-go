@@ -131,7 +131,7 @@ Brings the repository to "any handler can register a typed domain error and the 
 - [x] `internal/shared/http/middleware.go` exports `Middlewares(logger *slog.Logger) []func(http.Handler) http.Handler` returning the locked stack in order: chi `RequestID`, chi `RealIP`, a slog-adapter `Logger` middleware, chi `Recoverer`, `DomainErrorMiddleware`. (Design deviation: `Middlewares` returns the first four; `DomainErrorMiddleware` is composed separately in `cmd/library/main.go` because it needs the registry parameter. Functional order is preserved end-to-end.)
 - [x] `internal/shared/http/middleware.go` exports `DomainErrorRegistry` (a struct, not a global) with methods `Register(target error, status int, code string)` and `Lookup(err error) (status int, code string, ok bool)`. `Lookup` walks the `errors.As` chain so wrapped errors still match.
 - [x] `internal/shared/http/middleware.go` exports `DomainErrorMiddleware(registry *DomainErrorRegistry, logger *slog.Logger) func(http.Handler) http.Handler`.
-- [ ] `cmd/library/main.go` constructs the `DomainErrorRegistry` after the slog logger and registers Phase 1's two access-control errors: `registry.Register(&accesscontrol.UnauthorizedRoleError{}, http.StatusForbidden, "unauthorized_role")` and `registry.Register(&accesscontrol.UnknownActionError{}, http.StatusForbidden, "unknown_action")`. Phase 2+ modules extend this registration block in `main.go`. (Registry constructed in Slice 4; accesscontrol entries land in Slice 6 when the module exists.)
+- [x] `cmd/library/main.go` constructs the `DomainErrorRegistry` after the slog logger and registers Phase 1's two access-control errors: `registry.Register(&accesscontrol.UnauthorizedRoleError{}, http.StatusForbidden, "unauthorized_role")` and `registry.Register(&accesscontrol.UnknownActionError{}, http.StatusForbidden, "unknown_action")`. Phase 2+ modules extend this registration block in `main.go`. (Registry constructed in Slice 4; accesscontrol entries land in Slice 6 when the module exists.)
 - [x] To use the middleware, a handler returns an `error` via a thin wrapper `Handle(func(http.ResponseWriter, *http.Request) error) http.HandlerFunc`. `Handle` stores the returned error in the request context; `DomainErrorMiddleware` reads it after `next.ServeHTTP` returns.
 - [x] When a handler returns a registered error, `DomainErrorMiddleware` writes `WriteJSON(w, status, ErrorResponse{Error: code, Message: err.Error(), RequestID: middleware.GetReqID(ctx)})`.
 - [x] When a handler returns an unregistered error, `DomainErrorMiddleware` writes HTTP 500 with `ErrorResponse{Error: "internal_error", Message: "internal server error", RequestID: ...}` and logs the full error at `error` level (the raw `err.Error()` does **not** appear in the response body).
@@ -171,56 +171,56 @@ Brings the repository to "any future module can authorize an action against a ty
 
 #### Acceptance Criteria — types
 
-- [ ] `internal/accesscontrol/types.go` declares `type Role string` with constants `RoleMember Role = "MEMBER"`, `RoleAccount Role = "ACCOUNT"`, `RoleStaff Role = "STAFF"`.
-- [ ] `types.go` declares `type ModuleName string` and `type ActionName string` (named string types — not raw `string` — so misuse at call sites is caught by the compiler).
-- [ ] `types.go` declares `type AuthUser struct { MemberID string; Role Role }`. `MemberID` is a plain `string` in Phase 1 (the canonical `MemberId` newtype lands in `internal/membership` in Phase 2; access-control deliberately keeps it `string` to avoid an import cycle from `membership → accesscontrol`).
-- [ ] `types.go` declares `type UnauthorizedRoleError struct { MemberID string; Role Role; ModuleName ModuleName; Action ActionName }` implementing `Error() string`. The error message includes the role, module, and action in the format `role <ROLE> is not authorized to perform <module>.<action> (memberID: <id>)`.
-- [ ] `types.go` declares `type UnknownActionError struct { ModuleName ModuleName; Action ActionName }` implementing `Error() string`. The error message is `unknown action <module>.<action> — no policy defined`. (Matches the source's `UnknownActionError` for easy comparison.)
-- [ ] Both error types are comparable with `errors.As`: `var ure *UnauthorizedRoleError; errors.As(err, &ure)` returns true for a wrapped `UnauthorizedRoleError`.
-- [ ] `types.go` exports no other types.
+- [x] `internal/accesscontrol/types.go` declares `type Role string` with constants `RoleMember Role = "MEMBER"`, `RoleAccount Role = "ACCOUNT"`, `RoleStaff Role = "STAFF"`.
+- [x] `types.go` declares `type ModuleName string` and `type ActionName string` (named string types — not raw `string` — so misuse at call sites is caught by the compiler).
+- [x] `types.go` declares `type AuthUser struct { MemberID string; Role Role }`. `MemberID` is a plain `string` in Phase 1 (the canonical `MemberId` newtype lands in `internal/membership` in Phase 2; access-control deliberately keeps it `string` to avoid an import cycle from `membership → accesscontrol`).
+- [x] `types.go` declares `type UnauthorizedRoleError struct { MemberID string; Role Role; ModuleName ModuleName; Action ActionName }` implementing `Error() string`. The error message includes the role, module, and action in the format `role <ROLE> is not authorized to perform <module>.<action> (memberID: <id>)`.
+- [x] `types.go` declares `type UnknownActionError struct { ModuleName ModuleName; Action ActionName }` implementing `Error() string`. The error message is `unknown action <module>.<action> — no policy defined`. (Matches the source's `UnknownActionError` for easy comparison.)
+- [x] Both error types are comparable with `errors.As`: `var ure *UnauthorizedRoleError; errors.As(err, &ure)` returns true for a wrapped `UnauthorizedRoleError`.
+- [x] `types.go` exports no other types.
 
 #### Acceptance Criteria — policy
 
-- [ ] `internal/accesscontrol/policy.go` declares `var policy = map[ModuleName]map[ActionName][]Role{ ... }` containing the same entries as the source's `POLICY`: `lending.borrow → [RoleMember]`, `catalog.uploadThumbnail → [RoleStaff]`, `catalog.removeThumbnail → [RoleStaff]`. (These actions are pre-declared in Phase 1 even though no module implements them yet — they exist to prove the data-driven shape works and so the unit tests have something to assert against. The policy map is the source of truth that Phase 2+ modules extend.)
-- [ ] `policy` is **unexported** at the package level — callers reach it only through the facade. The test file is in the same package, so the table-driven test can reference `policy` directly.
-- [ ] No role logic is hardcoded in any business module — adding a new action means adding a row to `policy.go`, nothing else. (This is asserted as a doc-comment invariant on the `policy` var; it cannot be enforced mechanically in Phase 1 because no other modules exist yet.)
+- [x] `internal/accesscontrol/policy.go` declares `var policy = map[ModuleName]map[ActionName][]Role{ ... }` containing the same entries as the source's `POLICY`: `lending.borrow → [RoleMember]`, `catalog.uploadThumbnail → [RoleStaff]`, `catalog.removeThumbnail → [RoleStaff]`. (These actions are pre-declared in Phase 1 even though no module implements them yet — they exist to prove the data-driven shape works and so the unit tests have something to assert against. The policy map is the source of truth that Phase 2+ modules extend.)
+- [x] `policy` is **unexported** at the package level — callers reach it only through the facade. The test file is in the same package, so the table-driven test can reference `policy` directly.
+- [x] No role logic is hardcoded in any business module — adding a new action means adding a row to `policy.go`, nothing else. (This is asserted as a doc-comment invariant on the `policy` var; it cannot be enforced mechanically in Phase 1 because no other modules exist yet.)
 
 #### Acceptance Criteria — sample data (functional options)
 
-- [ ] `internal/accesscontrol/sample_data.go` exports `SampleAuthUser(opts ...AuthUserOption) AuthUser` returning a default `AuthUser{MemberID: "member-placeholder-id", Role: RoleMember}` mutated by each option.
-- [ ] `sample_data.go` exports `SampleStaffAuthUser(opts ...AuthUserOption) AuthUser` returning a default `AuthUser{MemberID: "staff-placeholder-id", Role: RoleStaff}` mutated by each option.
-- [ ] `sample_data.go` exports `type AuthUserOption func(*AuthUser)`, `WithMemberID(id string) AuthUserOption`, and `WithRole(r Role) AuthUserOption`.
-- [ ] Override-order is deterministic: a later option overwrites an earlier option (e.g. `SampleStaffAuthUser(WithRole(RoleMember))` returns a `MEMBER` user — proving role override works but documenting that it's the caller's job to pick the right builder).
-- [ ] `sample_data.go` is the only place in the module that constructs `AuthUser` literals outside of tests.
+- [x] `internal/accesscontrol/sample_data.go` exports `SampleAuthUser(opts ...AuthUserOption) AuthUser` returning a default `AuthUser{MemberID: "member-placeholder-id", Role: RoleMember}` mutated by each option.
+- [x] `sample_data.go` exports `SampleStaffAuthUser(opts ...AuthUserOption) AuthUser` returning a default `AuthUser{MemberID: "staff-placeholder-id", Role: RoleStaff}` mutated by each option.
+- [x] `sample_data.go` exports `type AuthUserOption func(*AuthUser)`, `WithMemberID(id string) AuthUserOption`, and `WithRole(r Role) AuthUserOption`.
+- [x] Override-order is deterministic: a later option overwrites an earlier option (e.g. `SampleStaffAuthUser(WithRole(RoleMember))` returns a `MEMBER` user — proving role override works but documenting that it's the caller's job to pick the right builder).
+- [x] `sample_data.go` is the only place in the module that constructs `AuthUser` literals outside of tests.
 
 #### Acceptance Criteria — facade
 
-- [ ] `internal/accesscontrol/facade.go` exports `type Facade struct { ... }` (or the locally-preferred `type AccessControlFacade struct`) with unexported fields and an exported constructor `NewFacade() *Facade`.
-- [ ] The facade has one method: `Authorize(authUser AuthUser, moduleName ModuleName, action ActionName) error`.
-- [ ] `Authorize` returns `nil` when `policy[moduleName][action]` contains `authUser.Role`.
-- [ ] `Authorize` returns a non-nil `*UnknownActionError` (with the offending module + action) when `policy[moduleName]` is nil **or** `policy[moduleName][action]` is nil.
-- [ ] `Authorize` returns a non-nil `*UnauthorizedRoleError` (carrying `MemberID`, `Role`, `ModuleName`, `Action`) when the policy entry exists but does not include the caller's role.
-- [ ] `Authorize` is the only method on the facade in Phase 1. No `Permit`, no `Forbid`, no role-mutation API.
+- [x] `internal/accesscontrol/facade.go` exports `type Facade struct { ... }` (or the locally-preferred `type AccessControlFacade struct`) with unexported fields and an exported constructor `NewFacade() *Facade`.
+- [x] The facade has one method: `Authorize(authUser AuthUser, moduleName ModuleName, action ActionName) error`.
+- [x] `Authorize` returns `nil` when `policy[moduleName][action]` contains `authUser.Role`.
+- [x] `Authorize` returns a non-nil `*UnknownActionError` (with the offending module + action) when `policy[moduleName]` is nil **or** `policy[moduleName][action]` is nil.
+- [x] `Authorize` returns a non-nil `*UnauthorizedRoleError` (carrying `MemberID`, `Role`, `ModuleName`, `Action`) when the policy entry exists but does not include the caller's role.
+- [x] `Authorize` is the only method on the facade in Phase 1. No `Permit`, no `Forbid`, no role-mutation API.
 
 #### Acceptance Criteria — configuration + module wiring
 
-- [ ] `internal/accesscontrol/configuration.go` exports `type Overrides struct{}` (empty in Phase 1, present so callers and tests have a stable extension point) and `func NewFacadeWithOverrides(_ Overrides) *Facade`.
-- [ ] `internal/accesscontrol/module.go` is **omitted entirely**. A package-level doc comment on `facade.go` documents the absence: "this module exposes no HTTP routes; it is wired purely by constructor injection into other facades." When Phase 2 modules arrive, they declare their own `module.go` against the established pattern. The AC is that no HTTP routes are registered under `/access-control/*` or any other access-control-named path.
-- [ ] Nothing in `cmd/library/main.go` mounts a router subtree for `accesscontrol`. The composition root constructs the facade and would pass it into other modules' constructors when they exist; in Phase 1 it constructs the facade and immediately drops the reference, which is acceptable.
+- [x] `internal/accesscontrol/configuration.go` exports `type Overrides struct{}` (empty in Phase 1, present so callers and tests have a stable extension point) and `func NewFacadeWithOverrides(_ Overrides) *Facade`.
+- [x] `internal/accesscontrol/module.go` is **omitted entirely**. A package-level doc comment on `facade.go` documents the absence: "this module exposes no HTTP routes; it is wired purely by constructor injection into other facades." When Phase 2 modules arrive, they declare their own `module.go` against the established pattern. The AC is that no HTTP routes are registered under `/access-control/*` or any other access-control-named path.
+- [x] Nothing in `cmd/library/main.go` mounts a router subtree for `accesscontrol`. The composition root constructs the facade and would pass it into other modules' constructors when they exist; in Phase 1 it constructs the facade and immediately drops the reference, which is acceptable.
 
 #### Acceptance Criteria — facade unit test
 
-- [ ] `internal/accesscontrol/facade_test.go` uses stdlib `testing` only (no testify) and is in package `accesscontrol` (not `accesscontrol_test`) so it can read the unexported `policy` map for the data-driven assertion.
-- [ ] AC: `Authorize` returns `nil` for a `MEMBER` calling `lending.borrow`.
-- [ ] AC: `Authorize` returns a `*UnauthorizedRoleError` for an `ACCOUNT` calling `lending.borrow`, and the error's `MemberID`, `Role`, `ModuleName`, `Action` fields are populated with the caller's inputs.
-- [ ] AC: `Authorize` returns a `*UnknownActionError` for any role calling `lending.unknown-action` (action absent from a known module).
-- [ ] AC: `Authorize` returns a `*UnknownActionError` for any role calling `unknown-module.borrow` (module absent from policy).
-- [ ] AC: The `UnauthorizedRoleError.Error()` message matches the regex `role ACCOUNT.*lending\.borrow`.
-- [ ] AC: `Authorize` returns `nil` for a `STAFF` user calling `catalog.uploadThumbnail` and `catalog.removeThumbnail`.
-- [ ] AC: `Authorize` returns a `*UnauthorizedRoleError` for a `MEMBER` and for an `ACCOUNT` calling `catalog.uploadThumbnail` and `catalog.removeThumbnail`.
-- [ ] AC: Data-driven snapshot — the test asserts `policy[ModuleName("lending")][ActionName("borrow")]` equals `[]Role{RoleMember}` and `policy[ModuleName("catalog")][ActionName("uploadThumbnail")]` equals `[]Role{RoleStaff}`, then proves `Authorize` honors that data.
-- [ ] AC: `SampleStaffAuthUser()` returns a `STAFF` user that `Authorize` accepts for `catalog.uploadThumbnail`. `SampleStaffAuthUser(WithMemberID("staff-42"))` overrides the ID and preserves the role.
-- [ ] The entire facade test file runs in well under 100 ms (most tests should be sub-millisecond).
+- [x] `internal/accesscontrol/facade_test.go` uses stdlib `testing` only (no testify) and is in package `accesscontrol` (not `accesscontrol_test`) so it can read the unexported `policy` map for the data-driven assertion.
+- [x] AC: `Authorize` returns `nil` for a `MEMBER` calling `lending.borrow`.
+- [x] AC: `Authorize` returns a `*UnauthorizedRoleError` for an `ACCOUNT` calling `lending.borrow`, and the error's `MemberID`, `Role`, `ModuleName`, `Action` fields are populated with the caller's inputs.
+- [x] AC: `Authorize` returns a `*UnknownActionError` for any role calling `lending.unknown-action` (action absent from a known module).
+- [x] AC: `Authorize` returns a `*UnknownActionError` for any role calling `unknown-module.borrow` (module absent from policy).
+- [x] AC: The `UnauthorizedRoleError.Error()` message matches the regex `role ACCOUNT.*lending\.borrow`.
+- [x] AC: `Authorize` returns `nil` for a `STAFF` user calling `catalog.uploadThumbnail` and `catalog.removeThumbnail`.
+- [x] AC: `Authorize` returns a `*UnauthorizedRoleError` for a `MEMBER` and for an `ACCOUNT` calling `catalog.uploadThumbnail` and `catalog.removeThumbnail`.
+- [x] AC: Data-driven snapshot — the test asserts `policy[ModuleName("lending")][ActionName("borrow")]` equals `[]Role{RoleMember}` and `policy[ModuleName("catalog")][ActionName("uploadThumbnail")]` equals `[]Role{RoleStaff}`, then proves `Authorize` honors that data.
+- [x] AC: `SampleStaffAuthUser()` returns a `STAFF` user that `Authorize` accepts for `catalog.uploadThumbnail`. `SampleStaffAuthUser(WithMemberID("staff-42"))` overrides the ID and preserves the role.
+- [x] The entire facade test file runs in well under 100 ms (most tests should be sub-millisecond).
 
 ---
 

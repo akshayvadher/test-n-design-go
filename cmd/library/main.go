@@ -26,6 +26,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 )
 
@@ -52,9 +53,9 @@ func main() {
 
 	logger := buildLogger(cfg, os.Stdout)
 	registry := sharedhttp.NewDomainErrorRegistry()
-	// Phase 1 ships an empty registry — every handler error collapses to
-	// 500/internal_error. Slice 6 lands accesscontrol and the registration
-	// block (UnauthorizedRoleError, UnknownActionError) below.
+	registry.Register(&accesscontrol.UnauthorizedRoleError{}, http.StatusForbidden, "unauthorized_role")
+	registry.Register(&accesscontrol.UnknownActionError{}, http.StatusForbidden, "unknown_action")
+	_ = accesscontrol.NewFacade()
 	router := buildRouter(logger, registry)
 	server := buildServer(cfg.HTTPPort, router)
 
