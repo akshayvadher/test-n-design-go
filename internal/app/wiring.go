@@ -23,6 +23,8 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
+	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 	"github.com/uptrace/bun"
@@ -62,6 +64,12 @@ type Wired struct {
 	// write hits Postgres.
 	CatalogFacade *catalog.Facade
 
+	// MembershipFacade is the membership module's facade. Integration tests
+	// use it to assert that HTTP-driven writes actually persisted. Slice 5
+	// wires it with the bun-backed repository so every HTTP-driven write
+	// hits Postgres.
+	MembershipFacade *membership.Facade
+
 	// Close releases every resource Wire allocated (currently: the bun DB
 	// connection pool). Callers MUST invoke Close on every path. Idempotent.
 	Close func() error
@@ -95,11 +103,18 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	})
 	cataloghttp.Wire(router, cataloghttp.Deps{Facade: catalogFacade, Logger: deps.Logger})
 
+	membershipFacade := membership.NewFacadeWithOverrides(membership.Overrides{
+		Repository: membership.NewBunRepository(bunDB),
+		Logger:     deps.Logger,
+	})
+	membershiphttp.Wire(router, membershiphttp.Deps{Facade: membershipFacade, Logger: deps.Logger})
+
 	return &Wired{
-		Router:        router,
-		DB:            bunDB,
-		CatalogFacade: catalogFacade,
-		Close:         bunDB.Close,
+		Router:           router,
+		DB:               bunDB,
+		CatalogFacade:    catalogFacade,
+		MembershipFacade: membershipFacade,
+		Close:            bunDB.Close,
 	}, nil
 }
 
@@ -115,6 +130,9 @@ func buildDomainErrorRegistry() *sharedhttp.DomainErrorRegistry {
 	registry.Register(&catalog.BookNotFoundError{}, http.StatusNotFound, "book_not_found")
 	registry.Register(&catalog.CopyNotFoundError{}, http.StatusNotFound, "copy_not_found")
 	registry.Register(&catalog.DuplicateIsbnError{}, http.StatusConflict, "duplicate_isbn")
+	registry.Register(&membership.InvalidMemberError{}, http.StatusBadRequest, "invalid_member")
+	registry.Register(&membership.MemberNotFoundError{}, http.StatusNotFound, "member_not_found")
+	registry.Register(&membership.DuplicateEmailError{}, http.StatusConflict, "duplicate_email")
 	return registry
 }
 

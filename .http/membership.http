@@ -1,0 +1,40 @@
+# Manual HTTP probes for the membership module (Phase 2 / Slice 5).
+#
+# How to use:
+#   1. Start the server with `task run`.
+#   2. Open this file in JetBrains GoLand/IntelliJ or in VSCode with the
+#      REST Client extension installed.
+#   3. Click the gutter icon next to a request to send it.
+#
+# Substitute <memberId> after the first POST returns.
+
+@baseUrl = http://localhost:3000
+
+### POST {{baseUrl}}/members — register a member
+POST {{baseUrl}}/members
+Content-Type: application/json
+
+{
+  "name": "Ada Lovelace",
+  "email": "ada.lovelace@example.com"
+}
+
+### GET {{baseUrl}}/members/<memberId> — find a member by id
+GET {{baseUrl}}/members/<memberId>
+
+### PATCH {{baseUrl}}/members/<memberId>/suspend — flip status to SUSPENDED
+PATCH {{baseUrl}}/members/<memberId>/suspend
+
+### PATCH {{baseUrl}}/members/<memberId>/reactivate — flip status back to ACTIVE
+PATCH {{baseUrl}}/members/<memberId>/reactivate
+
+### PATCH {{baseUrl}}/members/<memberId>/tier — upgrade membership tier
+PATCH {{baseUrl}}/members/<memberId>/tier
+Content-Type: application/json
+
+{
+  "tier": "PREMIUM"
+}
+
+### GET {{baseUrl}}/members/<memberId>/eligibility — check eligibility
+GET {{baseUrl}}/members/<memberId>/eligibility
