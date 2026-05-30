@@ -37,10 +37,10 @@ type AppConfig struct {
 	// relies on the hardcoded conservative defaults).
 	DatabaseURL string
 
-	// RedisURL is captured for symmetry with production wiring. Phase 1 has
-	// no Redis consumer yet (the bookcache module lands in Phase 2+), so the
-	// URL is stored on BootedApp for forward-compat without being threaded
-	// into app.Wire. The integration test still proves StartRedis works.
+	// RedisURL is the Redis DSN BootApp passes to app.Wire. When set, the
+	// catalog facade is wired with the Redis-backed bookcache; otherwise it
+	// falls back to the in-memory cache. Integration tests that need to
+	// exercise the cache substrate pass a URL produced by StartRedis.
 	RedisURL string
 }
 
@@ -81,6 +81,7 @@ func BootApp(ctx context.Context, t testing.TB, cfg AppConfig) BootedApp {
 	wired, err := app.Wire(ctx, app.Deps{
 		Logger:      logger,
 		DatabaseURL: cfg.DatabaseURL,
+		RedisURL:    cfg.RedisURL,
 	})
 	if err != nil {
 		t.Fatalf("wire app: %v", err)

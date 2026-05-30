@@ -14,17 +14,20 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/http"
+	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 	"github.com/uptrace/bun"
@@ -42,6 +45,13 @@ type Deps struct {
 	// PoolConfig is intentionally not exposed: Phase 1 relies on the
 	// hardcoded conservative defaults via db.PoolConfig{}.
 	DatabaseURL string
+
+	// RedisURL is the Redis DSN (e.g. redis://localhost:6379/0). When set,
+	// Wire constructs a *redis.Client and wires the catalog facade with a
+	// bookcache.NewRedisBookCacheGateway. Empty means "use the in-memory
+	// cache" — the unit-test and Phase-1-style integration paths can omit
+	// Redis entirely without touching the network.
+	RedisURL string
 }
 
 // Wired is the package-public handle Wire returns. The caller mounts Router
@@ -93,13 +103,20 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 		return nil, fmt.Errorf("wire bun db: %w", err)
 	}
 
+	cache, redisClient, err := buildBookCache(deps)
+	if err != nil {
+		_ = bunDB.Close()
+		return nil, fmt.Errorf("wire book cache: %w", err)
+	}
+
 	registry := buildDomainErrorRegistry()
 	router := buildRouter(deps.Logger, registry)
 	router.Get("/healthz", healthzHandler)
 
 	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{
-		Repository: catalog.NewBunRepository(bunDB),
-		Logger:     deps.Logger,
+		Repository:       catalog.NewBunRepository(bunDB),
+		BookCacheGateway: cache,
+		Logger:           deps.Logger,
 	})
 	cataloghttp.Wire(router, cataloghttp.Deps{Facade: catalogFacade, Logger: deps.Logger})
 
@@ -114,8 +131,37 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 		DB:               bunDB,
 		CatalogFacade:    catalogFacade,
 		MembershipFacade: membershipFacade,
-		Close:            bunDB.Close,
+		Close:            buildCloser(bunDB, redisClient),
 	}, nil
+}
+
+// buildBookCache constructs the BookCacheGateway the catalog facade depends on.
+// When deps.RedisURL is set, it parses the URL, opens a *redis.Client, and
+// returns a Redis-backed gateway plus the client (so the caller can close it).
+// When RedisURL is empty, it returns the in-memory gateway and a nil client —
+// the unit-test and Phase-1-style integration paths skip Redis entirely.
+func buildBookCache(deps Deps) (bookcache.BookCacheGateway, *redis.Client, error) {
+	if deps.RedisURL == "" {
+		return bookcache.NewInMemoryBookCacheGateway(), nil, nil
+	}
+	opts, err := redis.ParseURL(deps.RedisURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse redis url: %w", err)
+	}
+	client := redis.NewClient(opts)
+	return bookcache.NewRedisBookCacheGateway(client, bookcache.DefaultRedisTTL, deps.Logger), client, nil
+}
+
+// buildCloser composes a Close function that releases both the bun DB pool
+// and (when present) the Redis client. Errors are joined so callers see every
+// failure rather than only the first.
+func buildCloser(bunDB *bun.DB, redisClient *redis.Client) func() error {
+	if redisClient == nil {
+		return bunDB.Close
+	}
+	return func() error {
+		return errors.Join(bunDB.Close(), redisClient.Close())
+	}
 }
 
 // buildDomainErrorRegistry constructs the registry with every Phase-1 +

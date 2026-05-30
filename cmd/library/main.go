@@ -50,7 +50,11 @@ func main() {
 	logger := buildLogger(cfg, os.Stdout)
 
 	ctx := context.Background()
-	wired, err := app.Wire(ctx, app.Deps{Logger: logger, DatabaseURL: cfg.DatabaseURL})
+	wired, err := app.Wire(ctx, app.Deps{
+		Logger:      logger,
+		DatabaseURL: cfg.DatabaseURL,
+		RedisURL:    cfg.RedisURL,
+	})
 	if err != nil {
 		logger.Error("wire app", slog.String("error", err.Error()))
 		os.Exit(1)

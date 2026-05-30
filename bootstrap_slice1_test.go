@@ -99,12 +99,10 @@ func TestGoMod_DeclaresModulePathAndGoVersion(t *testing.T) {
 }
 
 func TestGoMod_ListsRequiredDirectDependencies(t *testing.T) {
-	// Spec AC line 59 lists the libs Phase 1 must keep buildable. `go mod tidy`
-	// during Slice 3-7 demoted github.com/redis/go-redis/v9 to NOT-listed
-	// (Phase 1 has zero production Redis consumers; the integration test
-	// reaches Redis only through testcontainers' redis module). Phase 2's
-	// bookcache slice will re-add it as a direct dep when it lands; until
-	// then the assertion would be a false-positive.
+	// Spec AC line 59 lists the libs Phase 1 must keep buildable. Phase 2's
+	// bookcache slice (Slice 7) re-adds github.com/redis/go-redis/v9 as a
+	// direct dep — the Redis-backed BookCacheGateway is the first production
+	// consumer. Before Slice 7 the assertion would have been a false-positive.
 	content := readFile(t, "go.mod")
 
 	required := []string{
@@ -113,6 +111,7 @@ func TestGoMod_ListsRequiredDirectDependencies(t *testing.T) {
 		"github.com/uptrace/bun/driver/pgdriver",
 		"github.com/spf13/viper",
 		"github.com/google/uuid",
+		"github.com/redis/go-redis/v9",
 	}
 	for _, dep := range required {
 		assertContains(t, content, dep, "go.mod required direct dep")
