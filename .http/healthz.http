@@ -1,0 +1,61 @@
+# Manual HTTP probes for the library server.
+#
+# How to use:
+#   1. Start the server with `task run`.
+#   2. Open this file in JetBrains GoLand/IntelliJ or in VSCode with the
+#      REST Client extension installed.
+#   3. Click the gutter icon next to a request to send it.
+#
+# The `{{baseUrl}}` variable resolves from the `@baseUrl` line below.
+
+@baseUrl = http://localhost:3000
+
+### GET {{baseUrl}}/healthz — Phase 1 (liveness probe)
+# Expected: status 200, body {"status":"ok"}
+GET {{baseUrl}}/healthz
+
+### GET {{baseUrl}}/does-not-exist — Phase 1 (404 fallthrough)
+# Expected: status 404
+GET {{baseUrl}}/does-not-exist
+
+### POST {{baseUrl}}/books — Phase 2 (catalog)
+# Activate when Phase 2 lands. Until then this block is inert.
+# POST {{baseUrl}}/books
+# Content-Type: application/json
+#
+# {
+#   "title": "The Pragmatic Programmer",
+#   "author": "Andy Hunt, Dave Thomas",
+#   "isbn": "9780135957059"
+# }
+
+### POST {{baseUrl}}/members — Phase 2 (membership)
+# Activate when Phase 2 lands. Until then this block is inert.
+# POST {{baseUrl}}/members
+# Content-Type: application/json
+#
+# {
+#   "name": "Ada Lovelace",
+#   "email": "ada@example.com"
+# }
+
+### POST {{baseUrl}}/loans — Phase 3 (lending)
+# Activate when Phase 3 lands. Until then this block is inert.
+# POST {{baseUrl}}/loans
+# Content-Type: application/json
+#
+# {
+#   "memberId": "00000000-0000-0000-0000-000000000000",
+#   "bookId":   "00000000-0000-0000-0000-000000000000"
+# }
+
+### POST {{baseUrl}}/chat — Phase 5 (chat, SSE)
+# Activate when Phase 5 lands. Until then this block is inert.
+# Response will be a text/event-stream — use REST Client's SSE support.
+# POST {{baseUrl}}/chat
+# Content-Type: application/json
+# Accept: text/event-stream
+#
+# {
+#   "message": "Recommend a book about distributed systems."
+# }

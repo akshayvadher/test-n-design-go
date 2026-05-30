@@ -273,13 +273,13 @@ Brings the repository to "a developer can open `.http/healthz.http` in JetBrains
 
 #### Acceptance Criteria
 
-- [ ] `.http/healthz.http` exists at the repo root (in a top-level `.http/` directory — sibling to `cmd/`, `internal/`, `migrations/`, `test/`).
-- [ ] The file's first non-comment line is `@baseUrl = http://localhost:3000` (a JetBrains/VSCode REST Client variable assignment). Every active request references it as `{{baseUrl}}`.
-- [ ] A short comment block at the top of the file documents the workflow: "Start the server with `task run`, then in JetBrains GoLand/IntelliJ or VSCode (with the REST Client extension installed) click the gutter icon next to a request to send it. The `{{baseUrl}}` variable resolves from the `@baseUrl` line above." Comments use the `#` line-comment form (REST Client format).
-- [ ] The file contains exactly two **active** requests, separated by `###` headers: (a) `GET {{baseUrl}}/healthz` with a comment naming the expected response (status 200, body `{"status":"ok"}`), and (b) `GET {{baseUrl}}/does-not-exist` with a comment naming the expected response (status 404).
-- [ ] The file contains commented-out placeholder request blocks for representative Phase 2+ endpoints, each under its own `###` header that names the phase. Required placeholders (at minimum — pick paths from the discovery doc's per-phase slice list): `### POST {{baseUrl}}/books — Phase 2 (catalog)`, `### POST {{baseUrl}}/members — Phase 2 (membership)`, `### POST {{baseUrl}}/loans — Phase 3 (lending)`, `### POST {{baseUrl}}/chat — Phase 5 (chat, SSE)`. Each placeholder block has the HTTP method/path/headers/body commented out via `#` line-comments so the request is **inert** (cannot be accidentally sent until a future phase activates it).
-- [ ] `.http/healthz.http` is committed to git. The file is **not** listed in `.gitignore`, and `.gitignore` is **not** amended in this slice (slice 1's `.gitignore` AC remains the canonical exclusion list).
-- [ ] No `Taskfile.yml` entry is added for `.http` — slice 1's task list is unchanged. Probing is a manual editor action; no automation hook in Phase 1.
+- [x] `.http/healthz.http` exists at the repo root (in a top-level `.http/` directory — sibling to `cmd/`, `internal/`, `migrations/`, `test/`).
+- [x] The file's first non-comment line is `@baseUrl = http://localhost:3000` (a JetBrains/VSCode REST Client variable assignment). Every active request references it as `{{baseUrl}}`.
+- [x] A short comment block at the top of the file documents the workflow: "Start the server with `task run`, then in JetBrains GoLand/IntelliJ or VSCode (with the REST Client extension installed) click the gutter icon next to a request to send it. The `{{baseUrl}}` variable resolves from the `@baseUrl` line above." Comments use the `#` line-comment form (REST Client format).
+- [x] The file contains exactly two **active** requests, separated by `###` headers: (a) `GET {{baseUrl}}/healthz` with a comment naming the expected response (status 200, body `{"status":"ok"}`), and (b) `GET {{baseUrl}}/does-not-exist` with a comment naming the expected response (status 404).
+- [x] The file contains commented-out placeholder request blocks for representative Phase 2+ endpoints, each under its own `###` header that names the phase. Required placeholders (at minimum — pick paths from the discovery doc's per-phase slice list): `### POST {{baseUrl}}/books — Phase 2 (catalog)`, `### POST {{baseUrl}}/members — Phase 2 (membership)`, `### POST {{baseUrl}}/loans — Phase 3 (lending)`, `### POST {{baseUrl}}/chat — Phase 5 (chat, SSE)`. Each placeholder block has the HTTP method/path/headers/body commented out via `#` line-comments so the request is **inert** (cannot be accidentally sent until a future phase activates it).
+- [x] `.http/healthz.http` is committed to git. The file is **not** listed in `.gitignore`, and `.gitignore` is **not** amended in this slice (slice 1's `.gitignore` AC remains the canonical exclusion list).
+- [x] No `Taskfile.yml` entry is added for `.http` — slice 1's task list is unchanged. Probing is a manual editor action; no automation hook in Phase 1.
 
 ---
 
