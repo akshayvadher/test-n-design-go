@@ -96,11 +96,15 @@ tasks:
 
   test:integration:
     desc: Run the integration test suite (testcontainers postgres + redis). Requires `task up` first.
+    env:
+      TESTCONTAINERS_RYUK_DISABLED: "true"
     cmds:
       - go test -tags=integration ./...
 
   test:integration:race:
     desc: Integration suite with race detector. Requires CGO and `task up`.
+    env:
+      TESTCONTAINERS_RYUK_DISABLED: "true"
     cmds:
       - go test -race -tags=integration ./...
 
