@@ -25,4 +25,9 @@ type ReservationRepository interface {
 	ListReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error)
 	ListReservationsForMember(ctx context.Context, memberId membership.MemberId) ([]ReservationDto, error)
 	PendingReservationCountForBook(ctx context.Context, bookId catalog.BookId) (int, error)
+	// ListPendingReservationsForBook returns reservations for bookId whose
+	// FulfilledAt IS NULL, ordered by ReservedAt ASC (FIFO queue order — the
+	// head-of-queue is the earliest pending reservation). Phase 4's saga
+	// consumer iterates the returned slice to find the next eligible reserver.
+	ListPendingReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error)
 }

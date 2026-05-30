@@ -124,6 +124,61 @@ type ReservationQueued struct {
 // Type implements events.DomainEvent.
 func (e ReservationQueued) Type() string { return "ReservationQueued" }
 
+// ReservationFulfilled is the domain event the auto-loan saga consumer
+// stages inside its claim-tx after writing FulfilledAt onto the reservation
+// row. Field order matches the source TS event 1:1.
+type ReservationFulfilled struct {
+	ReservationId ReservationId
+	MemberId      membership.MemberId
+	BookId        catalog.BookId
+	FulfilledAt   time.Time
+}
+
+// Type implements events.DomainEvent.
+func (e ReservationFulfilled) Type() string { return "ReservationFulfilled" }
+
+// ReservationUnfulfilled is the domain event the saga consumer stages
+// inside its un-fulfil-tx after the downstream Borrow rejected. Restores
+// the reservation to its pending state so the next return can claim it.
+type ReservationUnfulfilled struct {
+	ReservationId ReservationId
+	MemberId      membership.MemberId
+	BookId        catalog.BookId
+	UnfulfilledAt time.Time
+}
+
+// Type implements events.DomainEvent.
+func (e ReservationUnfulfilled) Type() string { return "ReservationUnfulfilled" }
+
+// AutoLoanOpened is the domain event the saga consumer publishes
+// (OUTSIDE any tx) after Borrow succeeds. Field order matches the source
+// TS event 1:1: BookId, LoanId, MemberId, ReservationId, OpenedAt.
+type AutoLoanOpened struct {
+	BookId        catalog.BookId
+	LoanId        LoanId
+	MemberId      membership.MemberId
+	ReservationId ReservationId
+	OpenedAt      time.Time
+}
+
+// Type implements events.DomainEvent.
+func (e AutoLoanOpened) Type() string { return "AutoLoanOpened" }
+
+// AutoLoanFailed is the domain event the saga consumer publishes (OUTSIDE
+// any tx) when the downstream Borrow rejected. Fires REGARDLESS of whether
+// the un-fulfil tx succeeded — the failure signal is decoupled from the
+// un-fulfil atomicity boundary on purpose.
+type AutoLoanFailed struct {
+	BookId        catalog.BookId
+	ReservationId ReservationId
+	MemberId      membership.MemberId
+	Reason        string
+	FailedAt      time.Time
+}
+
+// Type implements events.DomainEvent.
+func (e AutoLoanFailed) Type() string { return "AutoLoanFailed" }
+
 // LoanNotFoundError is returned by ReturnLoan and the (Phase 4) reporting
 // flows when a lookup by LoanId finds no record.
 type LoanNotFoundError struct {

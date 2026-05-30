@@ -127,6 +127,22 @@ func (r *BunReservationRepository) PendingReservationCountForBook(ctx context.Co
 	return count, nil
 }
 
+// ListPendingReservationsForBook returns reservations for bookId whose
+// fulfilled_at IS NULL, ordered by reserved_at ASC (FIFO queue order).
+// Reads bypass the tx substrate per the Phase 3 convention.
+func (r *BunReservationRepository) ListPendingReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error) {
+	var rows []ReservationRow
+	err := r.db.NewSelect().
+		Model(&rows).
+		Where("book_id = ? AND fulfilled_at IS NULL", bookId).
+		OrderExpr("reserved_at ASC").
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list pending reservations for book %q: %w", bookId, err)
+	}
+	return toReservationDtos(rows), nil
+}
+
 // toReservationRow converts a domain ReservationDto into the bun row.
 func toReservationRow(reservation ReservationDto) ReservationRow {
 	return ReservationRow{

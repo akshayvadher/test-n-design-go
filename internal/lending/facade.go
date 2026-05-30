@@ -208,6 +208,34 @@ func (f *Facade) ReturnLoan(ctx context.Context, loanId LoanId) (LoanDto, error)
 	return returned, nil
 }
 
+// ListLoansFor returns every loan persisted for memberId. Read-only;
+// no tx; no events. Consumed by Phase 4's fines module (the overdue-loan
+// assessment) and any future reporting flows.
+func (f *Facade) ListLoansFor(ctx context.Context, memberId membership.MemberId) ([]LoanDto, error) {
+	return f.loans.ListLoansForMember(ctx, memberId)
+}
+
+// ListOverdueLoans returns every loan whose ReturnedAt is nil AND whose
+// DueDate is strictly before now. Read-only; no tx; no events. Consumed by
+// Phase 4's fines module's ProcessOverdueLoans batch flow.
+func (f *Facade) ListOverdueLoans(ctx context.Context, now time.Time) ([]LoanDto, error) {
+	all, err := f.loans.ListLoans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	overdue := make([]LoanDto, 0, len(all))
+	for _, loan := range all {
+		if loan.ReturnedAt != nil {
+			continue
+		}
+		if !loan.DueDate.Before(now) {
+			continue
+		}
+		overdue = append(overdue, loan)
+	}
+	return overdue, nil
+}
+
 // requireEligible loads the member's eligibility and translates an
 // ineligible result into a *MemberIneligibleError, defaulting Reason to
 // "INELIGIBLE" if the membership facade returned an empty reason.

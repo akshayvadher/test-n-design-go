@@ -1188,6 +1188,10 @@ func (t *throwingOnceReservationRepository) PendingReservationCountForBook(ctx c
 	return t.delegate.PendingReservationCountForBook(ctx, bookId)
 }
 
+func (t *throwingOnceReservationRepository) ListPendingReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error) {
+	return t.delegate.ListPendingReservationsForBook(ctx, bookId)
+}
+
 // flakyBus wraps a real InMemoryEventBus, optionally short-circuiting
 // Publish for a single armed event type. Subscribe always delegates so
 // non-armed events fan out normally.

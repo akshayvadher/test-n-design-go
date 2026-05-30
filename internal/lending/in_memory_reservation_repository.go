@@ -84,6 +84,29 @@ func (r *InMemoryReservationRepository) PendingReservationCountForBook(_ context
 	return count, nil
 }
 
+// ListPendingReservationsForBook returns reservations for bookId whose
+// FulfilledAt is nil, defensively copied and ordered by ReservedAt ASC
+// (FIFO queue order). Ties on ReservedAt fall back to ReservationId ASC for
+// determinism.
+func (r *InMemoryReservationRepository) ListPendingReservationsForBook(_ context.Context, bookId catalog.BookId) ([]ReservationDto, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	pending := make([]ReservationDto, 0)
+	for _, reservation := range r.reservationsById {
+		if reservation.BookId != bookId || reservation.FulfilledAt != nil {
+			continue
+		}
+		pending = append(pending, cloneReservationDto(reservation))
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		if pending[i].ReservedAt.Equal(pending[j].ReservedAt) {
+			return pending[i].ReservationId < pending[j].ReservationId
+		}
+		return pending[i].ReservedAt.Before(pending[j].ReservedAt)
+	})
+	return pending, nil
+}
+
 // snapshotReservations returns the reservations matching keep, sorted by
 // ReservationId ascending, defensively copied. Caller MUST hold r.mu.
 func (r *InMemoryReservationRepository) snapshotReservations(keep func(ReservationDto) bool) []ReservationDto {
