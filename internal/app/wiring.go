@@ -58,8 +58,8 @@ type Wired struct {
 	// CatalogFacade is the catalog module's facade. Integration tests use
 	// it to assert that HTTP-driven writes actually persisted (e.g. by
 	// calling FindBook against the same facade the router is bound to).
-	// Slice 3 wires it with the in-memory repository as a temporary
-	// stand-in; Slice 4 swaps in the bun-backed repository.
+	// Slice 4 wires it with the bun-backed repository so every HTTP-driven
+	// write hits Postgres.
 	CatalogFacade *catalog.Facade
 
 	// Close releases every resource Wire allocated (currently: the bun DB
@@ -89,7 +89,10 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	router := buildRouter(deps.Logger, registry)
 	router.Get("/healthz", healthzHandler)
 
-	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{Logger: deps.Logger})
+	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{
+		Repository: catalog.NewBunRepository(bunDB),
+		Logger:     deps.Logger,
+	})
 	cataloghttp.Wire(router, cataloghttp.Deps{Facade: catalogFacade, Logger: deps.Logger})
 
 	return &Wired{
