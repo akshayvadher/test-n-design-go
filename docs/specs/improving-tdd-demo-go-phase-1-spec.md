@@ -149,19 +149,19 @@ Brings the repository to "modules can publish typed domain events and other modu
 
 #### Acceptance Criteria
 
-- [ ] `internal/shared/events/event_bus.go` exports `DomainEvent` interface with one method: `Type() string`.
-- [ ] `internal/shared/events/event_bus.go` exports `EventBus` interface with methods: `Publish(ctx context.Context, evt DomainEvent) error` and `Subscribe(eventType string, handler func(ctx context.Context, evt DomainEvent) error) Unsubscribe`, where `Unsubscribe` is a `func()` alias.
-- [ ] `internal/shared/events/in_memory_event_bus.go` exports `InMemoryEventBus` struct and `NewInMemoryEventBus(logger *slog.Logger) *InMemoryEventBus`.
-- [ ] `Publish` calls every handler subscribed for `evt.Type()` in registration order (first subscriber called first).
-- [ ] `Publish` calls handlers synchronously; it returns only after all handlers have returned.
-- [ ] If a handler returns an error, `Publish` logs it at `error` level with structured fields `event_type`, `handler_index`, `error`, then continues invoking the remaining handlers. `Publish` itself returns `nil` even when individual handlers fail (the bus is fire-and-forget at the publisher boundary — matches the TS source's behavior).
-- [ ] If a handler panics, the panic is recovered, logged at `error` level with a stack, the remaining handlers still run, and `Publish` returns `nil`.
-- [ ] `Subscribe` returns an `Unsubscribe` closure; after calling it, subsequent `Publish` calls do not invoke that handler.
-- [ ] Concurrent `Publish` from multiple goroutines is safe (use `sync.RWMutex` around the handler map; the unit test launches `N` goroutines and asserts no race when run with `-race`).
-- [ ] Subscribing to an event type with no current handlers is allowed (returns an `Unsubscribe` that is a no-op).
-- [ ] Publishing an event type with no subscribers is a no-op (returns `nil`).
-- [ ] `internal/shared/events/in_memory_event_bus_test.go` is table-driven where it makes sense (delivery order, multi-subscriber fanout, after-unsubscribe-not-called) and uses stdlib `testing` only. It includes a `t.Parallel()` test that publishes from 50 goroutines and asserts the handler is called 50 times.
-- [ ] The package exports no global event bus instance — every consumer takes `EventBus` as a constructor parameter.
+- [x] `internal/shared/events/event_bus.go` exports `DomainEvent` interface with one method: `Type() string`.
+- [x] `internal/shared/events/event_bus.go` exports `EventBus` interface with methods: `Publish(ctx context.Context, evt DomainEvent) error` and `Subscribe(eventType string, handler func(ctx context.Context, evt DomainEvent) error) Unsubscribe`, where `Unsubscribe` is a `func()` alias.
+- [x] `internal/shared/events/in_memory_event_bus.go` exports `InMemoryEventBus` struct and `NewInMemoryEventBus(logger *slog.Logger) *InMemoryEventBus`.
+- [x] `Publish` calls every handler subscribed for `evt.Type()` in registration order (first subscriber called first).
+- [x] `Publish` calls handlers synchronously; it returns only after all handlers have returned.
+- [x] If a handler returns an error, `Publish` logs it at `error` level with structured fields `event_type`, `handler_index`, `error`, then continues invoking the remaining handlers. `Publish` itself returns `nil` even when individual handlers fail (the bus is fire-and-forget at the publisher boundary — matches the TS source's behavior).
+- [x] If a handler panics, the panic is recovered, logged at `error` level with a stack, the remaining handlers still run, and `Publish` returns `nil`.
+- [x] `Subscribe` returns an `Unsubscribe` closure; after calling it, subsequent `Publish` calls do not invoke that handler.
+- [x] Concurrent `Publish` from multiple goroutines is safe (use `sync.RWMutex` around the handler map; the unit test launches `N` goroutines and asserts no race when run with `-race`).
+- [x] Subscribing to an event type with no current handlers is allowed (returns an `Unsubscribe` that is a no-op).
+- [x] Publishing an event type with no subscribers is a no-op (returns `nil`).
+- [x] `internal/shared/events/in_memory_event_bus_test.go` is table-driven where it makes sense (delivery order, multi-subscriber fanout, after-unsubscribe-not-called) and uses stdlib `testing` only. It includes a `t.Parallel()` test that publishes from 50 goroutines and asserts the handler is called 50 times.
+- [x] The package exports no global event bus instance — every consumer takes `EventBus` as a constructor parameter.
 
 ---
 
