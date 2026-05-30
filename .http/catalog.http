@@ -1,0 +1,52 @@
+# Manual HTTP probes for the catalog module (Phase 2 / Slice 3).
+#
+# How to use:
+#   1. Start the server with `task run`.
+#   2. Open this file in JetBrains GoLand/IntelliJ or in VSCode with the
+#      REST Client extension installed.
+#   3. Click the gutter icon next to a request to send it.
+#
+# Substitute <bookId> / <copyId> after the first POST returns.
+
+@baseUrl = http://localhost:3000
+
+### POST {{baseUrl}}/books — add a book
+POST {{baseUrl}}/books
+Content-Type: application/json
+
+{
+  "title": "The Pragmatic Programmer",
+  "authors": ["Andrew Hunt", "David Thomas"],
+  "isbn": "978-0135957059"
+}
+
+### GET {{baseUrl}}/books — list every book
+GET {{baseUrl}}/books
+
+### GET {{baseUrl}}/books/{isbn} — find a book by ISBN
+GET {{baseUrl}}/books/978-0135957059
+
+### PATCH {{baseUrl}}/books/<bookId> — update title only
+PATCH {{baseUrl}}/books/<bookId>
+Content-Type: application/json
+
+{
+  "title": "The Pragmatic Programmer, 20th Anniversary Edition"
+}
+
+### DELETE {{baseUrl}}/books/<bookId> — delete a book
+DELETE {{baseUrl}}/books/<bookId>
+
+### POST {{baseUrl}}/books/<bookId>/copies — register a physical copy
+POST {{baseUrl}}/books/<bookId>/copies
+Content-Type: application/json
+
+{
+  "condition": "GOOD"
+}
+
+### PATCH {{baseUrl}}/copies/<copyId>/available — mark a copy available
+PATCH {{baseUrl}}/copies/<copyId>/available
+
+### PATCH {{baseUrl}}/copies/<copyId>/unavailable — mark a copy unavailable
+PATCH {{baseUrl}}/copies/<copyId>/unavailable

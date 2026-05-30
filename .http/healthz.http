@@ -18,17 +18,6 @@ GET {{baseUrl}}/healthz
 # Expected: status 404
 GET {{baseUrl}}/does-not-exist
 
-### POST {{baseUrl}}/books — Phase 2 (catalog)
-# Activate when Phase 2 lands. Until then this block is inert.
-# POST {{baseUrl}}/books
-# Content-Type: application/json
-#
-# {
-#   "title": "The Pragmatic Programmer",
-#   "author": "Andy Hunt, Dave Thomas",
-#   "isbn": "9780135957059"
-# }
-
 ### POST {{baseUrl}}/members — Phase 2 (membership)
 # Activate when Phase 2 lands. Until then this block is inert.
 # POST {{baseUrl}}/members

@@ -21,6 +21,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
+	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 	"github.com/uptrace/bun"
@@ -53,15 +55,22 @@ type Wired struct {
 	// callers typically pass it down into module facade constructors.
 	DB *bun.DB
 
+	// CatalogFacade is the catalog module's facade. Integration tests use
+	// it to assert that HTTP-driven writes actually persisted (e.g. by
+	// calling FindBook against the same facade the router is bound to).
+	// Slice 3 wires it with the in-memory repository as a temporary
+	// stand-in; Slice 4 swaps in the bun-backed repository.
+	CatalogFacade *catalog.Facade
+
 	// Close releases every resource Wire allocated (currently: the bun DB
 	// connection pool). Callers MUST invoke Close on every path. Idempotent.
 	Close func() error
 }
 
 // Wire constructs the shared composition root: bun DB → domain-error registry
-// → chi router with the locked middleware stack → /healthz route. The
-// returned Wired bundles everything; the caller mounts Router onto its own
-// *http.Server.
+// → chi router with the locked middleware stack → /healthz route → catalog
+// module routes. The returned Wired bundles everything; the caller mounts
+// Router onto its own *http.Server.
 //
 // Wire intentionally does NOT start a listener, install signal handlers, or
 // own the *http.Server. Those concerns differ between the production binary
@@ -80,20 +89,29 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	router := buildRouter(deps.Logger, registry)
 	router.Get("/healthz", healthzHandler)
 
+	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{Logger: deps.Logger})
+	cataloghttp.Wire(router, cataloghttp.Deps{Facade: catalogFacade, Logger: deps.Logger})
+
 	return &Wired{
-		Router: router,
-		DB:     bunDB,
-		Close:  bunDB.Close,
+		Router:        router,
+		DB:            bunDB,
+		CatalogFacade: catalogFacade,
+		Close:         bunDB.Close,
 	}, nil
 }
 
-// buildDomainErrorRegistry constructs the registry with every Phase-1 domain
-// error registered. Phase 2+ modules extend this block when they introduce
-// their own error types.
+// buildDomainErrorRegistry constructs the registry with every Phase-1 +
+// Phase-2 catalog domain error registered. Later phases extend this block
+// when they introduce their own error types.
 func buildDomainErrorRegistry() *sharedhttp.DomainErrorRegistry {
 	registry := sharedhttp.NewDomainErrorRegistry()
 	registry.Register(&accesscontrol.UnauthorizedRoleError{}, http.StatusForbidden, "unauthorized_role")
 	registry.Register(&accesscontrol.UnknownActionError{}, http.StatusForbidden, "unknown_action")
+	registry.Register(&catalog.InvalidBookError{}, http.StatusBadRequest, "invalid_book")
+	registry.Register(&catalog.InvalidCopyError{}, http.StatusBadRequest, "invalid_copy")
+	registry.Register(&catalog.BookNotFoundError{}, http.StatusNotFound, "book_not_found")
+	registry.Register(&catalog.CopyNotFoundError{}, http.StatusNotFound, "copy_not_found")
+	registry.Register(&catalog.DuplicateIsbnError{}, http.StatusConflict, "duplicate_isbn")
 	return registry
 }
 
