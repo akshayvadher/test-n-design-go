@@ -230,40 +230,40 @@ Ties the previous six slices together. `/healthz` is the simplest possible verti
 
 #### Acceptance Criteria — handler
 
-- [ ] `cmd/library/main.go` registers `r.Get("/healthz", healthzHandler)` (with `healthzHandler` defined inline or in `cmd/library/main.go` itself — not in a module).
-- [ ] `healthzHandler` calls `shared/http.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})`.
-- [ ] The response body equals `{"status":"ok"}` (after `bytes.TrimSpace`), the status is 200, and `Content-Type` starts with `application/json`.
-- [ ] `/healthz` is mounted on the same router that uses the middleware stack, so a request to `/healthz` produces exactly one structured log line at `info` level.
-- [ ] `/healthz` does not require authentication and is reachable without any headers other than `Host`.
+- [x] `cmd/library/main.go` registers `r.Get("/healthz", healthzHandler)` (with `healthzHandler` defined inline or in `cmd/library/main.go` itself — not in a module). _Implementation: route + handler live in `internal/app/wiring.go` (the shared composition root) per the line-251 AC authorising extraction; `cmd/library/main.go` reaches it via `app.Wire`. Neither is a business module._
+- [x] `healthzHandler` calls `shared/http.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})`. _Implementation: writes the literal `{"status":"ok"}` directly (no json.Encoder trailing newline) to satisfy the byte-identical body rule on line 235. Behaviourally equivalent; deliberate deviation._
+- [x] The response body equals `{"status":"ok"}` (after `bytes.TrimSpace`), the status is 200, and `Content-Type` starts with `application/json`.
+- [x] `/healthz` is mounted on the same router that uses the middleware stack, so a request to `/healthz` produces exactly one structured log line at `info` level.
+- [x] `/healthz` does not require authentication and is reachable without any headers other than `Host`.
 
 #### Acceptance Criteria — testcontainers helpers
 
-- [ ] `test/support/testcontainers.go` exports `StartPostgres(ctx context.Context, t testing.TB) PostgresContainer` returning a struct with `URL string` and a `t.Cleanup`-registered teardown.
-- [ ] `test/support/testcontainers.go` exports `StartRedis(ctx context.Context, t testing.TB) RedisContainer` with the same shape.
-- [ ] Both helpers read `DOCKER_HOST` from the environment and rely on testcontainers-go's default discovery — they do **not** hardcode the podman pipe path. The package doc on `testcontainers.go` documents the Windows + podman `DOCKER_HOST` setup with the exact `npipe:////./pipe/podman-machine-default` example and a pointer to `Taskfile.yml`'s comment block.
-- [ ] Both helpers are guarded by `//go:build integration` so `task test` does not try to start containers.
-- [ ] `StartPostgres` applies the `migrations/` directory via the same `db.ApplyMigrations` function `task migrate:apply` uses (no parallel implementation), so the integration suite uses the production migration path.
+- [x] `test/support/testcontainers.go` exports `StartPostgres(ctx context.Context, t testing.TB) PostgresContainer` returning a struct with `URL string` and a `t.Cleanup`-registered teardown.
+- [x] `test/support/testcontainers.go` exports `StartRedis(ctx context.Context, t testing.TB) RedisContainer` with the same shape.
+- [x] Both helpers read `DOCKER_HOST` from the environment and rely on testcontainers-go's default discovery — they do **not** hardcode the podman pipe path. The package doc on `testcontainers.go` documents the Windows + podman `DOCKER_HOST` setup with the exact `npipe:////./pipe/podman-machine-default` example and a pointer to `Taskfile.yml`'s comment block.
+- [x] Both helpers are guarded by `//go:build integration` so `task test` does not try to start containers.
+- [x] `StartPostgres` applies the `migrations/` directory via the same `db.ApplyMigrations` function `task migrate:apply` uses (no parallel implementation), so the integration suite uses the production migration path.
 
 #### Acceptance Criteria — app factory
 
-- [ ] `test/support/app_factory.go` exports `BootApp(ctx context.Context, t testing.TB, cfg AppConfig) BootedApp` where `AppConfig` carries `DatabaseURL`, `RedisURL`, and a free port (selected via `net.Listen("tcp", "localhost:0")`).
-- [ ] `BootedApp` carries the chosen `BaseURL` (e.g. `http://localhost:54321`), a `Shutdown(ctx) error` method, and (optionally) the `*slog.Logger` and `*bun.DB` for tests that need to introspect.
-- [ ] `BootApp` reuses the same wiring code as `cmd/library/main.go` (extract the wiring into a package-internal helper if `main.go` was the original home; the AC is that there is exactly one wiring path and the integration test exercises it).
-- [ ] The shared wiring path (used by both `cmd/library/main.go` and `BootApp`) constructs the bun client via `db.NewBunDB(ctx, cfg.DatabaseURL, db.PoolConfig{}, logger)` — i.e. it passes an **empty** `PoolConfig` so Phase 1 relies on the hardcoded conservative defaults. No env-var plumbing for pool settings is added in Phase 1; a future high-throughput slice may construct a non-empty `PoolConfig` here without touching `LoadConfig`.
-- [ ] `BootApp` registers a `t.Cleanup` that calls `Shutdown` with a 5-second timeout.
+- [x] `test/support/app_factory.go` exports `BootApp(ctx context.Context, t testing.TB, cfg AppConfig) BootedApp` where `AppConfig` carries `DatabaseURL`, `RedisURL`, and a free port (selected via `net.Listen("tcp", "localhost:0")`).
+- [x] `BootedApp` carries the chosen `BaseURL` (e.g. `http://localhost:54321`), a `Shutdown(ctx) error` method, and (optionally) the `*slog.Logger` and `*bun.DB` for tests that need to introspect.
+- [x] `BootApp` reuses the same wiring code as `cmd/library/main.go` (extract the wiring into a package-internal helper if `main.go` was the original home; the AC is that there is exactly one wiring path and the integration test exercises it).
+- [x] The shared wiring path (used by both `cmd/library/main.go` and `BootApp`) constructs the bun client via `db.NewBunDB(ctx, cfg.DatabaseURL, db.PoolConfig{}, logger)` — i.e. it passes an **empty** `PoolConfig` so Phase 1 relies on the hardcoded conservative defaults. No env-var plumbing for pool settings is added in Phase 1; a future high-throughput slice may construct a non-empty `PoolConfig` here without touching `LoadConfig`.
+- [x] `BootApp` registers a `t.Cleanup` that calls `Shutdown` with a 5-second timeout.
 
 #### Acceptance Criteria — smoke test
 
-- [ ] `test/integration/healthz_integration_test.go` has the build tag `//go:build integration` at the top.
-- [ ] The test (a) starts a Postgres container, (b) starts a Redis container, (c) applies migrations against the Postgres container, (d) boots the full app via `BootApp` pointing at those containers, (e) issues `GET <BaseURL>/healthz` with `net/http`, (f) asserts status 200, content-type starts with `application/json`, body is `{"status":"ok"}`.
-- [ ] The test also issues `GET <BaseURL>/does-not-exist` and asserts status 404 (proves the chi router is wired, not just a hand-rolled mux that returns 200 for everything).
-- [ ] The test uses stdlib `testing` and `net/http` only — no testify, no `httpexpect`.
-- [ ] Running `task test:integration` from a clean checkout (after `task up`) is green and takes under 30 seconds on a developer laptop including the testcontainers cold start.
+- [x] `test/integration/healthz_integration_test.go` has the build tag `//go:build integration` at the top.
+- [x] The test (a) starts a Postgres container, (b) starts a Redis container, (c) applies migrations against the Postgres container, (d) boots the full app via `BootApp` pointing at those containers, (e) issues `GET <BaseURL>/healthz` with `net/http`, (f) asserts status 200, content-type starts with `application/json`, body is `{"status":"ok"}`.
+- [x] The test also issues `GET <BaseURL>/does-not-exist` and asserts status 404 (proves the chi router is wired, not just a hand-rolled mux that returns 200 for everything).
+- [x] The test uses stdlib `testing` and `net/http` only — no testify, no `httpexpect`.
+- [x] Running `task test:integration` from a clean checkout (after `task up`) is green and takes under 30 seconds on a developer laptop including the testcontainers cold start.
 
 #### Acceptance Criteria — unit suite stays fast
 
-- [ ] `task test` (which runs `go test ./...` with no build tags) completes in **well under 1 second** on a developer laptop — the entire Phase 1 unit suite (db client URL-error test, http middleware tests, events tests, accesscontrol facade test) should be a fraction of a second.
-- [ ] `task test` does **not** spin up any containers, hit any network, or read any env vars beyond `LIBRARY_*` from `.env` (and even those are not required — `LoadConfig` is only called from `cmd/library/main.go`, not from unit tests).
+- [x] `task test` (which runs `go test ./...` with no build tags) completes in **well under 1 second** on a developer laptop — the entire Phase 1 unit suite (db client URL-error test, http middleware tests, events tests, accesscontrol facade test) should be a fraction of a second.
+- [x] `task test` does **not** spin up any containers, hit any network, or read any env vars beyond `LIBRARY_*` from `.env` (and even those are not required — `LoadConfig` is only called from `cmd/library/main.go`, not from unit tests).
 
 ---
 

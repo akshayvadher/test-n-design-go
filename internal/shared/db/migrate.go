@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"sync"
 )
 
@@ -37,7 +38,7 @@ func ApplyMigrations(ctx context.Context, databaseURL string, migrationsDir stri
 	cmd := exec.CommandContext(ctx, "atlas",
 		"migrate", "apply",
 		"--url", databaseURL,
-		"--dir", "file://"+migrationsDir,
+		"--dir", fileURL(migrationsDir),
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -67,6 +68,16 @@ func ApplyMigrations(ctx context.Context, databaseURL string, migrationsDir stri
 		return fmt.Errorf("atlas migrate apply failed: %w", err)
 	}
 	return nil
+}
+
+// fileURL turns a filesystem path into an atlas-compatible `file://` URL.
+// Backslashes from a Windows path become forward slashes; atlas's parser
+// then accepts `file://D:/foo` (Windows absolute) and `file:///foo/bar`
+// (Linux absolute, where ToSlash leaves the leading `/`) and `file://foo`
+// (relative) uniformly. Without this conversion the parser mistakes
+// `D:` for a URL port and the run fails.
+func fileURL(path string) string {
+	return "file://" + filepath.ToSlash(path)
 }
 
 // streamLines copies pipe line-by-line to logger at the given level until EOF.

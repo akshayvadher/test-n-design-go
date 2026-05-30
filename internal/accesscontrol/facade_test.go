@@ -48,11 +48,11 @@ const (
 
 func TestAuthorize_KnownPolicyEntries(t *testing.T) {
 	cases := []struct {
-		name     string
-		user     AuthUser
-		module   ModuleName
-		action   ActionName
-		outcome  authorizeOutcome
+		name    string
+		user    AuthUser
+		module  ModuleName
+		action  ActionName
+		outcome authorizeOutcome
 	}{
 		{
 			name:    "MEMBER may borrow on lending",

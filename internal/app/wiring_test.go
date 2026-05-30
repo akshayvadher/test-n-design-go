@@ -1,11 +1,4 @@
-// main_test.go covers the pure http.HandlerFunc symbols defined in main.go.
-//
-// Slice 2's end-to-end shutdown sequencing (signal.NotifyContext +
-// http.Server.ListenAndServe + Shutdown) is deferred to Slice 7's integration
-// smoke test — it cannot be observed without spinning up real OS signals and
-// a real listener, both of which are integration concerns. This file is the
-// unit-test slice: the JSON shape of GET /healthz.
-package main
+package app
 
 import (
 	"bytes"
@@ -16,7 +9,10 @@ import (
 
 // -----------------------------------------------------------------------------
 // AC: GET /healthz returns 200 + application/json + body `{"status":"ok"}`
-// (byte-identical after bytes.TrimSpace).
+// (byte-identical after bytes.TrimSpace). This is the unit-level cover for the
+// handler that internal/app/wiring.go mounts on the chi router. The full
+// integration smoke (real listener, real testcontainers Postgres + Redis,
+// real migrations) lives in test/integration/healthz_integration_test.go.
 // -----------------------------------------------------------------------------
 
 func TestHealthzHandler_RespondsWithJSONStatusOK(t *testing.T) {

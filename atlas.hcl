@@ -9,8 +9,13 @@
 // `LIBRARY_DATABASE_URL` must be exported in the shell (or supplied via the
 // `.env` file the developer sources) before invoking `task migrate:apply`.
 
+variable "LIBRARY_DATABASE_URL" {
+  type    = string
+  default = getenv("LIBRARY_DATABASE_URL")
+}
+
 env "local" {
-  url = "${LIBRARY_DATABASE_URL}"
+  url = var.LIBRARY_DATABASE_URL
   dev = "docker://postgres/16/dev?search_path=public"
 
   migration {

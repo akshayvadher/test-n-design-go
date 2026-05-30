@@ -1,15 +1,20 @@
 // Package main is the composition root for the library service binary.
 //
-// main.go performs the full sequential wiring: load config → build logger →
-// build the chi router with the locked middleware stack → register routes →
-// start the HTTP server → block on SIGINT/SIGTERM → graceful shutdown.
+// main.go performs the sequential boot: load config → build logger → call
+// app.Wire to construct the bun client + chi router + middleware stack +
+// /healthz route → build the *http.Server → start listening → block on
+// SIGINT/SIGTERM → graceful shutdown → release wired resources.
+//
+// The wiring itself lives in internal/app so the integration test harness
+// (test/support/app_factory.go) goes through the same path — there is
+// exactly one composition root, exercised by both production and tests.
 //
 // No init() functions exist anywhere in the binary. Every collaborator that
 // logs receives the single *slog.Logger constructed here — slog.Default() is
 // never read.
 //
 // os.Exit is called from exactly two places: the config-load failure branch
-// (exit 1 before the logger exists) and the shutdown-error branch (exit 1
+// (exit 1 before the logger exists) and the runServer failure branch (exit 1
 // after attempting a graceful stop). Clean paths return from main normally.
 package main
 
@@ -24,10 +29,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
-	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
+	"github.com/akshayvadher/test-n-design-go/internal/app"
 )
 
 // readHeaderTimeout caps the time the HTTP server waits for request headers.
@@ -38,12 +40,6 @@ const readHeaderTimeout = 5 * time.Second
 // SIGINT/SIGTERM. Spec AC: Slice 2 uses a 10-second timeout.
 const shutdownTimeout = 10 * time.Second
 
-// healthzBody is the exact response payload for GET /healthz. It must be
-// byte-identical to `{"status":"ok"}` after bytes.TrimSpace, so we hold the
-// literal here rather than round-tripping through json.Encoder (which would
-// append a trailing newline).
-const healthzBody = `{"status":"ok"}`
-
 func main() {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -52,12 +48,20 @@ func main() {
 	}
 
 	logger := buildLogger(cfg, os.Stdout)
-	registry := sharedhttp.NewDomainErrorRegistry()
-	registry.Register(&accesscontrol.UnauthorizedRoleError{}, http.StatusForbidden, "unauthorized_role")
-	registry.Register(&accesscontrol.UnknownActionError{}, http.StatusForbidden, "unknown_action")
-	_ = accesscontrol.NewFacade()
-	router := buildRouter(logger, registry)
-	server := buildServer(cfg.HTTPPort, router)
+
+	ctx := context.Background()
+	wired, err := app.Wire(ctx, app.Deps{Logger: logger, DatabaseURL: cfg.DatabaseURL})
+	if err != nil {
+		logger.Error("wire app", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer func() {
+		if err := wired.Close(); err != nil {
+			logger.Error("close wired resources", slog.String("error", err.Error()))
+		}
+	}()
+
+	server := buildServer(cfg.HTTPPort, wired.Router)
 
 	if err := runServer(server, cfg.HTTPPort, logger); err != nil {
 		logger.Error("server shutdown failed", slog.String("error", err.Error()))
@@ -94,34 +98,6 @@ func parseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// buildRouter wires the chi router with the locked Phase-1 middleware stack
-// (RequestID → RealIP → slog-adapter Logger → Recoverer → DomainErrorMiddleware)
-// and registers the routes owned by the binary itself (currently just /healthz).
-//
-// The middleware stack is constructed by internal/shared/http.Middlewares so
-// every binary uses the same chain. DomainErrorMiddleware is appended
-// separately because it needs the registry; Middlewares stays a pure
-// (logger) → []middleware function.
-func buildRouter(logger *slog.Logger, registry *sharedhttp.DomainErrorRegistry) chi.Router {
-	r := chi.NewRouter()
-	for _, m := range sharedhttp.Middlewares(logger) {
-		r.Use(m)
-	}
-	r.Use(sharedhttp.DomainErrorMiddleware(registry, logger))
-
-	r.Get("/healthz", healthzHandler)
-	return r
-}
-
-// healthzHandler responds with the canonical {"status":"ok"} body. The body is
-// written as raw bytes (not json.Encoder.Encode) so the response is
-// byte-identical to the literal — no trailing newline.
-func healthzHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(healthzBody))
 }
 
 // buildServer assembles the *http.Server with the timeouts mandated by the

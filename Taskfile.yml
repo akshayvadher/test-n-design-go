@@ -20,6 +20,15 @@
 #
 # On Linux:   DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock
 # On macOS:   DOCKER_HOST=$(podman machine inspect | jq -r '.[].ConnectionInfo.PodmanSocket.Path')
+#
+# Podman does NOT create the default `bridge` network that testcontainers-go's
+# reaper (ryuk) expects, so also export:
+#
+#   TESTCONTAINERS_RYUK_DISABLED=true
+#
+# Container cleanup still happens via t.Cleanup() in the test helpers, so the
+# reaper is not load-bearing for our suite. Without this flag the integration
+# test fails with `unable to find network with name or ID bridge`.
 # -----------------------------------------------------------------------------
 #
 # Healthcheck wait strategy for `task up`:
@@ -47,42 +56,9 @@ tasks:
     internal: true
     desc: Poll podman compose until every service reports healthy.
     cmds:
-      - cmd: |
-          pwsh -NoProfile -Command "
-          $deadline = (Get-Date).AddSeconds({{.HEALTH_TIMEOUT_SECONDS}});
-          while ((Get-Date) -lt $deadline) {
-            $raw = podman compose ps --format json 2>$null;
-            if ($LASTEXITCODE -eq 0 -and $raw) {
-              try { $services = $raw | ConvertFrom-Json } catch { $services = @() };
-              if ($services -isnot [array]) { $services = @($services) };
-              if ($services.Count -ge 2) {
-                $healthy = $services | Where-Object { $_.Health -eq 'healthy' };
-                if ($healthy.Count -eq $services.Count) {
-                  Write-Host 'all services healthy';
-                  exit 0;
-                }
-              }
-            }
-            Start-Sleep -Seconds 2;
-          }
-          Write-Error 'timed out waiting for compose services to become healthy';
-          exit 1;
-          "
+      - cmd: pwsh -NoProfile -File scripts/wait-healthy.ps1 -TimeoutSeconds {{.HEALTH_TIMEOUT_SECONDS}}
         platforms: [windows]
-      - cmd: |
-          deadline=$(( $(date +%s) + {{.HEALTH_TIMEOUT_SECONDS}} ))
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            status=$(podman compose ps --format json 2>/dev/null || echo '[]')
-            count=$(printf '%s' "$status" | jq 'length')
-            healthy=$(printf '%s' "$status" | jq '[.[] | select(.Health == "healthy")] | length')
-            if [ "$count" -ge 2 ] && [ "$count" = "$healthy" ]; then
-              echo "all services healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "timed out waiting for compose services to become healthy" >&2
-          exit 1
+      - cmd: bash scripts/wait-healthy.sh {{.HEALTH_TIMEOUT_SECONDS}}
         platforms: [linux, darwin]
 
   down:
@@ -111,12 +87,29 @@ tasks:
   test:
     desc: Run the unit test suite (no build tags, no containers, no network).
     cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run the unit suite with the race detector. Requires CGO (gcc on Windows).
+    cmds:
       - go test -race ./...
 
   test:integration:
-    desc: Run the integration test suite (testcontainers postgres + redis).
+    desc: Run the integration test suite (testcontainers postgres + redis). Requires `task up` first.
+    cmds:
+      - go test -tags=integration ./...
+
+  test:integration:race:
+    desc: Integration suite with race detector. Requires CGO and `task up`.
     cmds:
       - go test -race -tags=integration ./...
+
+  ci:
+    desc: Aggregate gate used by CI — fmt check, vet, race-enabled unit tests, build.
+    cmds:
+      - task: lint
+      - task: test:race
+      - task: build
 
   migrate:apply:
     desc: Apply pending atlas migrations to the dev postgres.
