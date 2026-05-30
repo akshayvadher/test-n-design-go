@@ -28,16 +28,6 @@ GET {{baseUrl}}/does-not-exist
 #   "email": "ada@example.com"
 # }
 
-### POST {{baseUrl}}/loans — Phase 3 (lending)
-# Activate when Phase 3 lands. Until then this block is inert.
-# POST {{baseUrl}}/loans
-# Content-Type: application/json
-#
-# {
-#   "memberId": "00000000-0000-0000-0000-000000000000",
-#   "bookId":   "00000000-0000-0000-0000-000000000000"
-# }
-
 ### POST {{baseUrl}}/chat — Phase 5 (chat, SSE)
 # Activate when Phase 5 lands. Until then this block is inert.
 # Response will be a text/event-stream — use REST Client's SSE support.

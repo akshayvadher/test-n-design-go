@@ -21,16 +21,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
+	"github.com/uptrace/bun"
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
+	"github.com/akshayvadher/test-n-design-go/internal/lending"
+	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/http"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
+	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
-	"github.com/uptrace/bun"
 )
 
 // Deps carries the inputs Wire needs from the caller. The caller (main or
@@ -80,6 +83,19 @@ type Wired struct {
 	// hits Postgres.
 	MembershipFacade *membership.Facade
 
+	// LendingFacade is the lending module's facade. Integration tests use
+	// it to assert post-commit cross-module mutations (e.g. catalog flips a
+	// copy to UNAVAILABLE after Borrow) by calling FindCopy via the catalog
+	// facade right after a Borrow returns 201.
+	LendingFacade *lending.Facade
+
+	// Bus is the in-process event bus the lending facade publishes
+	// LoanOpened / LoanReturned / ReservationQueued events through.
+	// Exposed so integration tests can subscribe and assert that domain
+	// events surface end-to-end, including the Phase-3 "LoanReturned is
+	// observable on the bus even with no consumer subscribed" criterion.
+	Bus events.EventBus
+
 	// Close releases every resource Wire allocated (currently: the bun DB
 	// connection pool). Callers MUST invoke Close on every path. Idempotent.
 	Close func() error
@@ -126,11 +142,25 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	})
 	membershiphttp.Wire(router, membershiphttp.Deps{Facade: membershipFacade, Logger: deps.Logger})
 
+	bus := events.NewInMemoryEventBus(deps.Logger)
+	accessControlFacade := accesscontrol.NewFacade()
+	lendingFacade := lending.WireBunFacade(
+		bunDB,
+		bus,
+		catalogFacade,
+		membershipFacade,
+		accessControlFacade,
+		deps.Logger,
+	)
+	lendinghttp.Wire(router, lendinghttp.Deps{Facade: lendingFacade, Logger: deps.Logger})
+
 	return &Wired{
 		Router:           router,
 		DB:               bunDB,
 		CatalogFacade:    catalogFacade,
 		MembershipFacade: membershipFacade,
+		LendingFacade:    lendingFacade,
+		Bus:              bus,
 		Close:            buildCloser(bunDB, redisClient),
 	}, nil
 }
@@ -179,6 +209,13 @@ func buildDomainErrorRegistry() *sharedhttp.DomainErrorRegistry {
 	registry.Register(&membership.InvalidMemberError{}, http.StatusBadRequest, "invalid_member")
 	registry.Register(&membership.MemberNotFoundError{}, http.StatusNotFound, "member_not_found")
 	registry.Register(&membership.DuplicateEmailError{}, http.StatusConflict, "duplicate_email")
+	registry.Register(&lending.LoanNotFoundError{}, http.StatusNotFound, "loan_not_found")
+	registry.Register(&lending.ReservationNotFoundError{}, http.StatusNotFound, "reservation_not_found")
+	registry.Register(&lending.CopyUnavailableError{}, http.StatusConflict, "copy_unavailable")
+	registry.Register(&lending.MemberIneligibleError{}, http.StatusConflict, "member_ineligible")
+	registry.Register(&lending.BorrowValidationError{}, http.StatusBadRequest, "invalid_borrow")
+	registry.Register(&lending.ReserveValidationError{}, http.StatusBadRequest, "invalid_reserve")
+	registry.Register(&lending.ReturnLoanValidationError{}, http.StatusBadRequest, "invalid_return")
 	return registry
 }
 

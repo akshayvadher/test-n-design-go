@@ -15,6 +15,9 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/akshayvadher/test-n-design-go/internal/app"
+	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 )
 
 // readHeaderTimeout matches the production binary's http.Server setting so
@@ -53,10 +56,13 @@ type AppConfig struct {
 // use them, but the spec AC requires the field set so Phase 2+ specs do not
 // have to extend BootedApp before introspection is possible.
 type BootedApp struct {
-	BaseURL  string
-	Logger   *slog.Logger
-	DB       *bun.DB
-	Shutdown func(ctx context.Context) error
+	BaseURL          string
+	Logger           *slog.Logger
+	DB               *bun.DB
+	Bus              events.EventBus
+	CatalogFacade    *catalog.Facade
+	MembershipFacade *membership.Facade
+	Shutdown         func(ctx context.Context) error
 }
 
 // BootApp brings up the full composition root against the supplied
@@ -104,9 +110,12 @@ func BootApp(ctx context.Context, t testing.TB, cfg AppConfig) BootedApp {
 	waitForListening(t, baseURL, listenErrors)
 
 	booted := BootedApp{
-		BaseURL: baseURL,
-		Logger:  logger,
-		DB:      wired.DB,
+		BaseURL:          baseURL,
+		Logger:           logger,
+		DB:               wired.DB,
+		Bus:              wired.Bus,
+		CatalogFacade:    wired.CatalogFacade,
+		MembershipFacade: wired.MembershipFacade,
 		Shutdown: func(stopCtx context.Context) error {
 			shutdownErr := server.Shutdown(stopCtx)
 			closeErr := wired.Close()
