@@ -49,6 +49,7 @@ import (
 	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
 	bookcacheredis "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/redis"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
+	chatgatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
@@ -238,7 +239,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	)
 	categorieshttp.Wire(router, categorieshttp.Deps{Facade: categoriesFacade, Logger: deps.Logger})
 
-	chatFacade := chat.NewFacade(chatgateway.NewInMemoryChatGateway(), deps.Logger)
+	chatFacade := chat.NewFacade(chatgatewaymemory.NewGateway(), deps.Logger)
 	chathttp.Wire(router, chathttp.Deps{Facade: chatFacade, Logger: deps.Logger})
 
 	autoLoanConsumer := lending.NewAutoLoanOnReturnConsumer(lending.AutoLoanOnReturnConsumerDeps{

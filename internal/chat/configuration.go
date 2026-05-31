@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
+	chatgatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway/memory"
 )
 
 // Overrides is the test-substitution extension point for the chat
@@ -20,7 +21,7 @@ type Overrides struct {
 func NewFacadeWithOverrides(o Overrides) *Facade {
 	gateway := o.Gateway
 	if gateway == nil {
-		gateway = chatgateway.NewInMemoryChatGateway()
+		gateway = chatgatewaymemory.NewGateway()
 	}
 	logger := o.Logger
 	if logger == nil {

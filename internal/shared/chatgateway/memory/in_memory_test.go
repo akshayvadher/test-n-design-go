@@ -1,16 +1,18 @@
-package chatgateway
+package memory
 
 import (
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
 )
 
 func TestInMemoryChatGateway_StreamsTokensInOrder(t *testing.T) {
-	gateway := NewInMemoryChatGateway()
-	ch, err := gateway.Stream(context.Background(), []ChatMessage{
-		{Role: RoleUser, Content: "hello world go"},
+	gateway := NewGateway()
+	ch, err := gateway.Stream(context.Background(), []chatgateway.ChatMessage{
+		{Role: chatgateway.RoleUser, Content: "hello world go"},
 	})
 	if err != nil {
 		t.Fatalf("Stream returned error: %v", err)
@@ -24,9 +26,9 @@ func TestInMemoryChatGateway_StreamsTokensInOrder(t *testing.T) {
 }
 
 func TestInMemoryChatGateway_SingleTokenMessage(t *testing.T) {
-	gateway := NewInMemoryChatGateway()
-	ch, err := gateway.Stream(context.Background(), []ChatMessage{
-		{Role: RoleUser, Content: "hi"},
+	gateway := NewGateway()
+	ch, err := gateway.Stream(context.Background(), []chatgateway.ChatMessage{
+		{Role: chatgateway.RoleUser, Content: "hi"},
 	})
 	if err != nil {
 		t.Fatalf("Stream returned error: %v", err)
@@ -37,21 +39,21 @@ func TestInMemoryChatGateway_SingleTokenMessage(t *testing.T) {
 }
 
 func TestInMemoryChatGateway_EmptyMessagesReturnsError(t *testing.T) {
-	gateway := NewInMemoryChatGateway()
+	gateway := NewGateway()
 	ch, err := gateway.Stream(context.Background(), nil)
 	if ch != nil {
 		t.Fatalf("expected nil channel, got %v", ch)
 	}
-	var empty *EmptyMessagesError
+	var empty *chatgateway.EmptyMessagesError
 	if !errors.As(err, &empty) {
-		t.Fatalf("expected *EmptyMessagesError, got %v", err)
+		t.Fatalf("expected *chatgateway.EmptyMessagesError, got %v", err)
 	}
 }
 
 func TestInMemoryChatGateway_WhitespaceOnlyContentEmitsZeroDeltas(t *testing.T) {
-	gateway := NewInMemoryChatGateway()
-	ch, err := gateway.Stream(context.Background(), []ChatMessage{
-		{Role: RoleUser, Content: "   "},
+	gateway := NewGateway()
+	ch, err := gateway.Stream(context.Background(), []chatgateway.ChatMessage{
+		{Role: chatgateway.RoleUser, Content: "   "},
 	})
 	if err != nil {
 		t.Fatalf("Stream returned error: %v", err)
@@ -62,10 +64,10 @@ func TestInMemoryChatGateway_WhitespaceOnlyContentEmitsZeroDeltas(t *testing.T) 
 }
 
 func TestInMemoryChatGateway_ContextCancellationAbortsStream(t *testing.T) {
-	gateway := &InMemoryChatGateway{TokenInterval: 50 * time.Millisecond}
+	gateway := &Gateway{TokenInterval: 50 * time.Millisecond}
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := gateway.Stream(ctx, []ChatMessage{
-		{Role: RoleUser, Content: "a b c d e"},
+	ch, err := gateway.Stream(ctx, []chatgateway.ChatMessage{
+		{Role: chatgateway.RoleUser, Content: "a b c d e"},
 	})
 	if err != nil {
 		t.Fatalf("Stream returned error: %v", err)
@@ -81,7 +83,7 @@ func TestInMemoryChatGateway_ContextCancellationAbortsStream(t *testing.T) {
 	}
 	cancel()
 
-	collected := []ChatDelta{first}
+	collected := []chatgateway.ChatDelta{first}
 	done := make(chan struct{})
 	go func() {
 		for d := range ch {
@@ -102,11 +104,11 @@ func TestInMemoryChatGateway_ContextCancellationAbortsStream(t *testing.T) {
 }
 
 func TestInMemoryChatGateway_UsesLastMessageOnly(t *testing.T) {
-	gateway := NewInMemoryChatGateway()
-	ch, err := gateway.Stream(context.Background(), []ChatMessage{
-		{Role: RoleUser, Content: "ignored"},
-		{Role: RoleAssistant, Content: "also ignored"},
-		{Role: RoleUser, Content: "echo me"},
+	gateway := NewGateway()
+	ch, err := gateway.Stream(context.Background(), []chatgateway.ChatMessage{
+		{Role: chatgateway.RoleUser, Content: "ignored"},
+		{Role: chatgateway.RoleAssistant, Content: "also ignored"},
+		{Role: chatgateway.RoleUser, Content: "echo me"},
 	})
 	if err != nil {
 		t.Fatalf("Stream returned error: %v", err)
@@ -120,7 +122,7 @@ func TestInMemoryChatGateway_UsesLastMessageOnly(t *testing.T) {
 // Content strings. Non-nil Err on any delta is recorded by appending the
 // error message; tests inspecting per-token errors do so explicitly via
 // the returned slice's contents.
-func drain(ch <-chan ChatDelta) []string {
+func drain(ch <-chan chatgateway.ChatDelta) []string {
 	var out []string
 	for d := range ch {
 		if d.Err != nil {

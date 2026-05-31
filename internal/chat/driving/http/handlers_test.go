@@ -22,6 +22,7 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/chat"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
+	chatgatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 )
 
@@ -30,7 +31,7 @@ import (
 // -----------------------------------------------------------------------------
 
 func TestStreamChat_EmitsDeltaFramesThenDone(t *testing.T) {
-	srv := buildServer(t, chatgateway.NewInMemoryChatGateway())
+	srv := buildServer(t, chatgatewaymemory.NewGateway())
 
 	frames := postChat(t, srv, `{"messages":[{"role":"user","content":"hello world"}]}`)
 
@@ -43,7 +44,7 @@ func TestStreamChat_EmitsDeltaFramesThenDone(t *testing.T) {
 }
 
 func TestStreamChat_SetsSSEHeaders(t *testing.T) {
-	srv := buildServer(t, chatgateway.NewInMemoryChatGateway())
+	srv := buildServer(t, chatgatewaymemory.NewGateway())
 
 	resp := mustPost(t, srv, `{"messages":[{"role":"user","content":"hi"}]}`)
 	defer resp.Body.Close()
@@ -68,7 +69,7 @@ func TestStreamChat_SetsSSEHeaders(t *testing.T) {
 }
 
 func TestStreamChat_AssistantHistoryUsesLastMessage(t *testing.T) {
-	srv := buildServer(t, chatgateway.NewInMemoryChatGateway())
+	srv := buildServer(t, chatgatewaymemory.NewGateway())
 
 	body := `{"messages":[` +
 		`{"role":"user","content":"ignored"},` +
@@ -90,22 +91,22 @@ func TestStreamChat_AssistantHistoryUsesLastMessage(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestStreamChat_InvalidJSONReturns400(t *testing.T) {
-	srv := buildServer(t, chatgateway.NewInMemoryChatGateway())
+	srv := buildServer(t, chatgatewaymemory.NewGateway())
 	assertErrorResponse(t, srv, `{not json`, http.StatusBadRequest, "invalid_chat_request")
 }
 
 func TestStreamChat_EmptyMessagesReturns400(t *testing.T) {
-	srv := buildServer(t, chatgateway.NewInMemoryChatGateway())
+	srv := buildServer(t, chatgatewaymemory.NewGateway())
 	assertErrorResponse(t, srv, `{"messages":[]}`, http.StatusBadRequest, "invalid_chat_request")
 }
 
 func TestStreamChat_InvalidRoleReturns400(t *testing.T) {
-	srv := buildServer(t, chatgateway.NewInMemoryChatGateway())
+	srv := buildServer(t, chatgatewaymemory.NewGateway())
 	assertErrorResponse(t, srv, `{"messages":[{"role":"robot","content":"hi"}]}`, http.StatusBadRequest, "invalid_chat_request")
 }
 
 func TestStreamChat_UnknownFieldReturns400(t *testing.T) {
-	srv := buildServer(t, chatgateway.NewInMemoryChatGateway())
+	srv := buildServer(t, chatgatewaymemory.NewGateway())
 	body := `{"messages":[{"role":"user","content":"hi"}],"system_prompt":"ignored"}`
 	assertErrorResponse(t, srv, body, http.StatusBadRequest, "invalid_chat_request")
 }
