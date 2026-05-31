@@ -35,7 +35,7 @@ import (
 	categoriesbun "github.com/akshayvadher/test-n-design-go/internal/categories/driven/bun"
 	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/chat"
-	chathttp "github.com/akshayvadher/test-n-design-go/internal/chat/http"
+	chathttp "github.com/akshayvadher/test-n-design-go/internal/chat/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
 	finesbun "github.com/akshayvadher/test-n-design-go/internal/fines/driven/bun"
 	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/driving/http"
