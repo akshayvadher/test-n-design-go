@@ -40,7 +40,8 @@ import (
 	finesbun "github.com/akshayvadher/test-n-design-go/internal/fines/driven/bun"
 	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
-	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/http"
+	lendingbun "github.com/akshayvadher/test-n-design-go/internal/lending/driven/bun"
+	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipbun "github.com/akshayvadher/test-n-design-go/internal/membership/driven/bun"
 	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/driving/http"
@@ -202,7 +203,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 
 	bus := events.NewInMemoryEventBus(deps.Logger)
 	accessControlFacade := accesscontrol.NewFacade()
-	lendingWiring := lending.WireBunFacade(
+	lendingWiring := lendingbun.WireFacade(
 		bunDB,
 		bus,
 		catalogFacade,

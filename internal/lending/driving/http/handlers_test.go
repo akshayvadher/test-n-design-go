@@ -27,6 +27,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
+	lendingmemory "github.com/akshayvadher/test-n-design-go/internal/lending/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
@@ -77,7 +78,7 @@ func buildScene(t *testing.T) *testScene {
 		NewID:  sequentialIds("mem"),
 		Logger: logger,
 	})
-	lendingFacade := lending.NewFacadeWithOverrides(lending.Overrides{
+	lendingFacade := lendingmemory.NewFacadeWithOverrides(lendingmemory.Overrides{
 		Catalog:    catalogFacade,
 		Membership: membershipFacade,
 		NewID:      sequentialIds("loan"),

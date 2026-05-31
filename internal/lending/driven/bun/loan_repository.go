@@ -1,4 +1,4 @@
-package lending
+package bun
 
 import (
 	"context"
@@ -7,23 +7,24 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/uptrace/bun"
+	upstreambun "github.com/uptrace/bun"
 
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
 )
 
 // LoanRow is the bun-mapped persistent shape of a loan. JSON tags are
 // intentionally absent — this struct never crosses the HTTP boundary;
-// the HTTP DTOs in internal/lending/http own that.
+// the HTTP DTOs in internal/lending/driving/http own that.
 //
 // Column names match migrations/0003_lending.sql verbatim. ReturnedAt is a
 // pointer for the "not yet returned" sentinel (matches LoanDto).
 type LoanRow struct {
-	bun.BaseModel `bun:"table:loans"`
+	upstreambun.BaseModel `bun:"table:loans"`
 
-	LoanId     LoanId              `bun:"loan_id,pk"`
+	LoanId     lending.LoanId      `bun:"loan_id,pk"`
 	MemberId   membership.MemberId `bun:"member_id,notnull"`
 	CopyId     catalog.CopyId      `bun:"copy_id,notnull"`
 	BookId     catalog.BookId      `bun:"book_id,notnull"`
@@ -32,24 +33,24 @@ type LoanRow struct {
 	ReturnedAt *time.Time          `bun:"returned_at"`
 }
 
-// BunLoanRepository is the Postgres-backed LoanRepository implementation.
-// SaveLoan stages the write inside the supplied TransactionalContext so the
-// INSERT runs against the live tx handle resolved via tx.TxFromContext.
-// Reads (FindLoanById, List*) bypass the tx substrate and go directly
-// through the base *bun.DB.
-type BunLoanRepository struct {
-	db *bun.DB
+// LoanRepository is the Postgres-backed lending.LoanRepository
+// implementation. SaveLoan stages the write inside the supplied
+// TransactionalContext so the INSERT runs against the live tx handle
+// resolved via tx.TxFromContext. Reads (FindLoanById, List*) bypass the
+// tx substrate and go directly through the base *bun.DB.
+type LoanRepository struct {
+	db *upstreambun.DB
 }
 
-// Compile-time assertion that BunLoanRepository satisfies LoanRepository.
-// If a method signature drifts, the assertion fails before any test runs.
-var _ LoanRepository = (*BunLoanRepository)(nil)
+// Compile-time assertion that *LoanRepository satisfies the lending
+// LoanRepository driven port.
+var _ lending.LoanRepository = (*LoanRepository)(nil)
 
-// NewBunLoanRepository constructs a BunLoanRepository bound to db. The
-// caller owns the *bun.DB lifecycle (open + close); BunLoanRepository does
-// not close it.
-func NewBunLoanRepository(db *bun.DB) *BunLoanRepository {
-	return &BunLoanRepository{db: db}
+// NewLoanRepository constructs a *LoanRepository bound to db. The caller
+// owns the *bun.DB lifecycle (open + close); LoanRepository does not
+// close it.
+func NewLoanRepository(db *upstreambun.DB) *LoanRepository {
+	return &LoanRepository{db: db}
 }
 
 // SaveLoan stages an upsert keyed by loan_id. The stage closure runs
@@ -57,7 +58,7 @@ func NewBunLoanRepository(db *bun.DB) *BunLoanRepository {
 // Stage contract); the upsert matches catalog.SaveBook's
 // `onConflictDoUpdate` shape so re-saving a loan (e.g. flipping ReturnedAt
 // from nil to a timestamp during ReturnLoan) overwrites in place.
-func (r *BunLoanRepository) SaveLoan(_ context.Context, loan LoanDto, txc tx.TransactionalContext) error {
+func (r *LoanRepository) SaveLoan(_ context.Context, loan lending.LoanDto, txc tx.TransactionalContext) error {
 	row := toLoanRow(loan)
 	txc.Stage(func(ctx context.Context) error {
 		handle := resolveBunHandle(ctx, r.db)
@@ -80,7 +81,7 @@ func (r *BunLoanRepository) SaveLoan(_ context.Context, loan LoanDto, txc tx.Tra
 }
 
 // FindLoanById returns the loan by primary key, or (nil, nil) on miss.
-func (r *BunLoanRepository) FindLoanById(ctx context.Context, loanId LoanId) (*LoanDto, error) {
+func (r *LoanRepository) FindLoanById(ctx context.Context, loanId lending.LoanId) (*lending.LoanDto, error) {
 	var row LoanRow
 	err := r.db.NewSelect().Model(&row).Where("loan_id = ?", loanId).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -94,7 +95,7 @@ func (r *BunLoanRepository) FindLoanById(ctx context.Context, loanId LoanId) (*L
 }
 
 // ListLoans returns every loan ordered by loan_id ASC.
-func (r *BunLoanRepository) ListLoans(ctx context.Context) ([]LoanDto, error) {
+func (r *LoanRepository) ListLoans(ctx context.Context) ([]lending.LoanDto, error) {
 	var rows []LoanRow
 	err := r.db.NewSelect().Model(&rows).OrderExpr("loan_id ASC").Scan(ctx)
 	if err != nil {
@@ -105,7 +106,7 @@ func (r *BunLoanRepository) ListLoans(ctx context.Context) ([]LoanDto, error) {
 
 // ListLoansForMember returns the loans whose member_id matches, ordered by
 // loan_id ASC for deterministic output.
-func (r *BunLoanRepository) ListLoansForMember(ctx context.Context, memberId membership.MemberId) ([]LoanDto, error) {
+func (r *LoanRepository) ListLoansForMember(ctx context.Context, memberId membership.MemberId) ([]lending.LoanDto, error) {
 	var rows []LoanRow
 	err := r.db.NewSelect().
 		Model(&rows).
@@ -120,7 +121,7 @@ func (r *BunLoanRepository) ListLoansForMember(ctx context.Context, memberId mem
 
 // ListLoansForBook returns the loans whose book_id matches, ordered by
 // loan_id ASC for deterministic output.
-func (r *BunLoanRepository) ListLoansForBook(ctx context.Context, bookId catalog.BookId) ([]LoanDto, error) {
+func (r *LoanRepository) ListLoansForBook(ctx context.Context, bookId catalog.BookId) ([]lending.LoanDto, error) {
 	var rows []LoanRow
 	err := r.db.NewSelect().
 		Model(&rows).
@@ -137,7 +138,7 @@ func (r *BunLoanRepository) ListLoansForBook(ctx context.Context, bookId catalog
 // inside a TransactionalContext.Run) or the base *bun.DB as fallback. The
 // repo MUST honour the live tx so staged writes participate in the rollback
 // when the work function or another stage closure fails.
-func resolveBunHandle(ctx context.Context, db *bun.DB) bun.IDB {
+func resolveBunHandle(ctx context.Context, db *upstreambun.DB) upstreambun.IDB {
 	if handle, ok := tx.TxFromContext(ctx); ok && handle != nil {
 		return handle
 	}
@@ -147,7 +148,7 @@ func resolveBunHandle(ctx context.Context, db *bun.DB) bun.IDB {
 // toLoanRow converts a domain LoanDto into the bun row. The ReturnedAt
 // pointer is propagated as-is; nil maps to NULL in Postgres via bun's
 // nullable column handling.
-func toLoanRow(loan LoanDto) LoanRow {
+func toLoanRow(loan lending.LoanDto) LoanRow {
 	return LoanRow{
 		LoanId:     loan.LoanId,
 		MemberId:   loan.MemberId,
@@ -160,8 +161,8 @@ func toLoanRow(loan LoanDto) LoanRow {
 }
 
 // toLoanDto converts a bun row back into a domain LoanDto.
-func toLoanDto(row LoanRow) LoanDto {
-	return LoanDto{
+func toLoanDto(row LoanRow) lending.LoanDto {
+	return lending.LoanDto{
 		LoanId:     row.LoanId,
 		MemberId:   row.MemberId,
 		CopyId:     row.CopyId,
@@ -174,8 +175,8 @@ func toLoanDto(row LoanRow) LoanDto {
 
 // toLoanDtos converts a slice of bun rows into a fresh slice of domain
 // LoanDtos, preserving order.
-func toLoanDtos(rows []LoanRow) []LoanDto {
-	loans := make([]LoanDto, 0, len(rows))
+func toLoanDtos(rows []LoanRow) []lending.LoanDto {
+	loans := make([]lending.LoanDto, 0, len(rows))
 	for _, row := range rows {
 		loans = append(loans, toLoanDto(row))
 	}

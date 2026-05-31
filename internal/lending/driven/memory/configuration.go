@@ -1,4 +1,4 @@
-package lending
+package memory
 
 import (
 	"io"
@@ -10,6 +10,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
+	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
@@ -30,8 +31,8 @@ type Overrides struct {
 	Catalog       *catalog.Facade
 	Membership    *membership.Facade
 	AccessControl *accesscontrol.Facade
-	Loans         LoanRepository
-	Reservations  ReservationRepository
+	Loans         lending.LoanRepository
+	Reservations  lending.ReservationRepository
 	Bus           events.EventBus
 	// TxFactory must construct a TransactionalContext against the same
 	// EventBus the facade uses. See the type doc for the consistency rule
@@ -42,13 +43,13 @@ type Overrides struct {
 	Logger    *slog.Logger
 }
 
-// NewFacadeWithOverrides constructs a Facade applying the supplied
-// Overrides on top of the in-memory defaults. The defaults wire fresh
-// cross-module facades, fresh in-memory loan + reservation repos, a fresh
-// in-memory event bus, an in-memory TransactionalContext factory closing
-// over that same bus, UUID-string id generation, wall-clock time and a
-// silent slog logger.
-func NewFacadeWithOverrides(o Overrides) *Facade {
+// NewFacadeWithOverrides constructs a lending.Facade applying the
+// supplied Overrides on top of the in-memory defaults. The defaults wire
+// fresh cross-module facades, fresh in-memory loan + reservation repos, a
+// fresh in-memory event bus, an in-memory TransactionalContext factory
+// closing over that same bus, UUID-string id generation, wall-clock time
+// and a silent slog logger.
+func NewFacadeWithOverrides(o Overrides) *lending.Facade {
 	logger := o.Logger
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -67,11 +68,11 @@ func NewFacadeWithOverrides(o Overrides) *Facade {
 	}
 	loans := o.Loans
 	if loans == nil {
-		loans = NewInMemoryLoanRepository()
+		loans = NewLoanRepository()
 	}
 	reservations := o.Reservations
 	if reservations == nil {
-		reservations = NewInMemoryReservationRepository()
+		reservations = NewReservationRepository()
 	}
 	bus := o.Bus
 	if bus == nil {
@@ -93,7 +94,7 @@ func NewFacadeWithOverrides(o Overrides) *Facade {
 	if clock == nil {
 		clock = time.Now
 	}
-	return NewFacade(
+	return lending.NewFacade(
 		catalogFacade,
 		membershipFacade,
 		accessControlFacade,
