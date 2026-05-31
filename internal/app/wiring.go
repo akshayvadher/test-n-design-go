@@ -31,6 +31,8 @@ import (
 	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
 	"github.com/akshayvadher/test-n-design-go/internal/categories"
 	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/http"
+	"github.com/akshayvadher/test-n-design-go/internal/chat"
+	chathttp "github.com/akshayvadher/test-n-design-go/internal/chat/http"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
 	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/http"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
@@ -38,6 +40,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
+	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
@@ -116,6 +119,12 @@ type Wired struct {
 	// router is bound to). Slice 5 wires it with the bun-backed
 	// repository so every HTTP-driven write hits Postgres.
 	CategoriesFacade *categories.Facade
+
+	// ChatFacade is the chat module's facade. Tests can hold a
+	// reference to exercise the streaming surface without going
+	// through HTTP. Phase 5 wires it with the deterministic in-memory
+	// gateway by default so `task run` boots without an OpenAI key.
+	ChatFacade *chat.Facade
 
 	// Bus is the in-process event bus the lending facade publishes
 	// LoanOpened / LoanReturned / ReservationQueued events through.
@@ -211,6 +220,9 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	})
 	categorieshttp.Wire(router, categorieshttp.Deps{Facade: categoriesFacade, Logger: deps.Logger})
 
+	chatFacade := chat.NewFacade(chatgateway.NewInMemoryChatGateway(), deps.Logger)
+	chathttp.Wire(router, chathttp.Deps{Facade: chatFacade, Logger: deps.Logger})
+
 	autoLoanConsumer := lending.NewAutoLoanOnReturnConsumer(lending.AutoLoanOnReturnConsumerDeps{
 		Bus:          bus,
 		Membership:   membershipFacade,
@@ -237,6 +249,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 		AutoLoanConsumer: autoLoanConsumer,
 		FinesFacade:      finesFacade,
 		CategoriesFacade: categoriesFacade,
+		ChatFacade:       chatFacade,
 		Bus:              bus,
 		Close:            buildCloser(autoLoanConsumer, bunDB, redisClient),
 	}, nil
@@ -336,6 +349,9 @@ func buildDomainErrorRegistry() *sharedhttp.DomainErrorRegistry {
 	registry.Register(&categories.DuplicateCategoryError{}, http.StatusConflict, "duplicate_category")
 	registry.Register(&categories.InvalidCategoryError{}, http.StatusBadRequest, "invalid_category")
 	registry.Register(&categories.InvalidCategoriesQueryError{}, http.StatusBadRequest, "invalid_categories_query")
+	registry.Register(&chat.InvalidChatRequestError{}, http.StatusBadRequest, "invalid_chat_request")
+	registry.Register(&chat.ChatGatewayError{}, http.StatusBadGateway, "chat_gateway_error")
+	registry.Register(&chatgateway.EmptyMessagesError{}, http.StatusBadRequest, "empty_messages")
 	return registry
 }
 

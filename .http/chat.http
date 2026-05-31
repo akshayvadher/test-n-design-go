@@ -1,0 +1,45 @@
+# Manual HTTP probes for the chat module (Phase 5).
+#
+# How to use:
+#   1. Start the server with `task run`.
+#   2. Open this file in JetBrains GoLand/IntelliJ or VSCode with the
+#      REST Client extension installed.
+#   3. Click the gutter icon next to a request to send it.
+#
+# NOTE — server-sent events:
+# The /chat endpoint streams text/event-stream. JetBrains' REST Client
+# renders each `event:` / `data:` frame as it arrives. From a terminal
+# the equivalent probe is:
+#
+#   curl -N -X POST http://localhost:3000/chat \
+#     -H 'Content-Type: application/json' \
+#     -d '{"messages":[{"role":"user","content":"hello world go"}]}'
+#
+# With OPENAI_API_KEY unset the in-memory gateway splits the LAST
+# message's content on whitespace and emits one delta per token. With
+# the key set, real LLM tokens stream from OpenAI.
+
+@baseUrl = http://localhost:3000
+
+### POST {{baseUrl}}/chat — stream a chat completion
+POST {{baseUrl}}/chat
+Content-Type: application/json
+
+{
+  "messages": [
+    {"role": "user", "content": "hello world go"}
+  ]
+}
+
+### POST {{baseUrl}}/chat — multi-turn history (in-memory gateway uses only the LAST user message)
+POST {{baseUrl}}/chat
+Content-Type: application/json
+
+{
+  "messages": [
+    {"role": "system", "content": "you are concise"},
+    {"role": "user", "content": "ignored by in-memory gateway"},
+    {"role": "assistant", "content": "also ignored"},
+    {"role": "user", "content": "echo me"}
+  ]
+}
