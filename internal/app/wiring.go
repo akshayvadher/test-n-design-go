@@ -41,7 +41,8 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/http"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
-	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/http"
+	membershipbun "github.com/akshayvadher/test-n-design-go/internal/membership/driven/bun"
+	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
@@ -187,10 +188,11 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	})
 	cataloghttp.Wire(router, cataloghttp.Deps{Facade: catalogFacade, Logger: deps.Logger})
 
-	membershipFacade := membership.NewFacadeWithOverrides(membership.Overrides{
-		Repository: membership.NewBunRepository(bunDB),
-		Logger:     deps.Logger,
-	})
+	membershipFacade := membership.NewFacade(
+		membershipbun.NewRepository(bunDB),
+		uuid.NewString,
+		deps.Logger,
+	)
 	membershiphttp.Wire(router, membershiphttp.Deps{Facade: membershipFacade, Logger: deps.Logger})
 
 	bus := events.NewInMemoryEventBus(deps.Logger)

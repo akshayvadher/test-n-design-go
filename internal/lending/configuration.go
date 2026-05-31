@@ -10,6 +10,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
 )
@@ -57,7 +58,7 @@ func NewFacadeWithOverrides(o Overrides) *Facade {
 	}
 	membershipFacade := o.Membership
 	if membershipFacade == nil {
-		membershipFacade = membership.NewFacadeWithOverrides(membership.Overrides{})
+		membershipFacade = membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{})
 	}
 	accessControlFacade := o.AccessControl
 	if accessControlFacade == nil {

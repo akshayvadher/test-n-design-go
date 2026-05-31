@@ -10,6 +10,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 )
 
@@ -48,7 +49,7 @@ func NewFacadeWithOverrides(o Overrides) *fines.Facade {
 	}
 	membershipFacade := o.Membership
 	if membershipFacade == nil {
-		membershipFacade = membership.NewFacadeWithOverrides(membership.Overrides{})
+		membershipFacade = membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{})
 	}
 	repository := o.Repository
 	if repository == nil {

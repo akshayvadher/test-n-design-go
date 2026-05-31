@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 )
 
@@ -50,7 +51,7 @@ func silentLogger() *slog.Logger {
 func buildRouter(t *testing.T) (chi.Router, *membership.Facade) {
 	t.Helper()
 	logger := silentLogger()
-	facade := membership.NewFacadeWithOverrides(membership.Overrides{
+	facade := membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{
 		NewID:  sequentialIds("m"),
 		Logger: logger,
 	})

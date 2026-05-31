@@ -29,6 +29,7 @@ import (
 	finesmemory "github.com/akshayvadher/test-n-design-go/internal/fines/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 )
 
@@ -146,7 +147,7 @@ func buildScene(t *testing.T, opts ...func(*sceneOpts)) *scene {
 		NewID:  sequentialIds("cat"),
 		Logger: logger,
 	})
-	membershipFacade := membership.NewFacadeWithOverrides(membership.Overrides{
+	membershipFacade := membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{
 		NewID:  sequentialIds("mem"),
 		Logger: logger,
 	})

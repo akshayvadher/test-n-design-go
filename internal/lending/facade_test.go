@@ -28,6 +28,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
 )
@@ -130,7 +131,7 @@ func buildSceneWith(t *testing.T, extra Overrides) *scene {
 	}
 	membershipFacade := extra.Membership
 	if membershipFacade == nil {
-		membershipFacade = membership.NewFacadeWithOverrides(membership.Overrides{
+		membershipFacade = membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{
 			NewID:  sequentialIds("mem"),
 			Logger: logger,
 		})

@@ -2,17 +2,23 @@
 // 1:1 port of apps/library/src/membership/membership.facade.spec.ts from
 // the source TypeScript repository.
 //
-// The file lives in package membership so it can reach unexported helpers
-// without exporting test-only code from the production barrel. Stdlib
-// testing only — t.Run for nested describe blocks, errors.As for typed-
-// error assertions, no testify, no mock library.
-package membership
+// Lives in package membership_test (external test package) so it can
+// import the in-memory adapter from internal/membership/driven/memory
+// without creating an import cycle. Every symbol is qualified with the
+// membership.* prefix.
+//
+// Stdlib testing only — t.Run for nested describe blocks, errors.As for
+// typed-error assertions, no testify, no mock library.
+package membership_test
 
 import (
 	"context"
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -56,15 +62,16 @@ func itoa(n int) string {
 }
 
 // buildFacade constructs a Facade with deterministic ids and the default
-// in-memory substrates from configuration.go. Mirrors the TS buildFacade.
-func buildFacade(t *testing.T) *Facade {
+// in-memory substrates from driven/memory/configuration.go. Mirrors the
+// TS buildFacade.
+func buildFacade(t *testing.T) *membership.Facade {
 	t.Helper()
-	return NewFacadeWithOverrides(Overrides{NewID: sequentialIds("member")})
+	return membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{NewID: sequentialIds("member")})
 }
 
 // mustRegisterMember is a tiny helper for arrange-phase calls where a
 // t.Fatalf on failure is cleaner than a four-line err check.
-func mustRegisterMember(t *testing.T, facade *Facade, dto NewMemberDto) MemberDto {
+func mustRegisterMember(t *testing.T, facade *membership.Facade, dto membership.NewMemberDto) membership.MemberDto {
 	t.Helper()
 	member, err := facade.RegisterMember(context.Background(), dto)
 	if err != nil {
@@ -76,7 +83,7 @@ func mustRegisterMember(t *testing.T, facade *Facade, dto NewMemberDto) MemberDt
 // assertInvalidMember fails the test if err is not *InvalidMemberError.
 func assertInvalidMember(t *testing.T, err error) {
 	t.Helper()
-	var target *InvalidMemberError
+	var target *membership.InvalidMemberError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected *InvalidMemberError, got %T (%v)", err, err)
 	}
@@ -85,7 +92,7 @@ func assertInvalidMember(t *testing.T, err error) {
 // assertMemberNotFound fails the test if err is not *MemberNotFoundError.
 func assertMemberNotFound(t *testing.T, err error) {
 	t.Helper()
-	var target *MemberNotFoundError
+	var target *membership.MemberNotFoundError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected *MemberNotFoundError, got %T (%v)", err, err)
 	}
@@ -94,7 +101,7 @@ func assertMemberNotFound(t *testing.T, err error) {
 // assertDuplicateEmail fails the test if err is not *DuplicateEmailError.
 func assertDuplicateEmail(t *testing.T, err error) {
 	t.Helper()
-	var target *DuplicateEmailError
+	var target *membership.DuplicateEmailError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected *DuplicateEmailError, got %T (%v)", err, err)
 	}
@@ -110,7 +117,7 @@ func TestMembershipFacade(t *testing.T) {
 	t.Run("registers a member with an id, STANDARD tier, and ACTIVE status by default", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		member, err := facade.RegisterMember(ctx, SampleNewMember())
+		member, err := facade.RegisterMember(ctx, membership.SampleNewMember())
 		if err != nil {
 			t.Fatalf("RegisterMember failed: %v", err)
 		}
@@ -118,17 +125,17 @@ func TestMembershipFacade(t *testing.T) {
 		if member.MemberId == "" {
 			t.Errorf("MemberId: got empty, want non-empty")
 		}
-		if member.Tier != MembershipTierStandard {
-			t.Errorf("Tier: got %q, want %q", member.Tier, MembershipTierStandard)
+		if member.Tier != membership.MembershipTierStandard {
+			t.Errorf("Tier: got %q, want %q", member.Tier, membership.MembershipTierStandard)
 		}
-		if member.Status != MembershipStatusActive {
-			t.Errorf("Status: got %q, want %q", member.Status, MembershipStatusActive)
+		if member.Status != membership.MembershipStatusActive {
+			t.Errorf("Status: got %q, want %q", member.Status, membership.MembershipStatusActive)
 		}
 	})
 
 	t.Run("finds a registered member by memberId", func(t *testing.T) {
 		facade := buildFacade(t)
-		registered := mustRegisterMember(t, facade, SampleNewMember())
+		registered := mustRegisterMember(t, facade, membership.SampleNewMember())
 
 		found, err := facade.FindMember(ctx, registered.MemberId)
 		if err != nil {
@@ -141,28 +148,28 @@ func TestMembershipFacade(t *testing.T) {
 
 	t.Run("suspends an active member", func(t *testing.T) {
 		facade := buildFacade(t)
-		member := mustRegisterMember(t, facade, SampleNewMember())
+		member := mustRegisterMember(t, facade, membership.SampleNewMember())
 
 		suspended, err := facade.Suspend(ctx, member.MemberId)
 		if err != nil {
 			t.Fatalf("Suspend failed: %v", err)
 		}
-		if suspended.Status != MembershipStatusSuspended {
-			t.Errorf("returned status: got %q, want %q", suspended.Status, MembershipStatusSuspended)
+		if suspended.Status != membership.MembershipStatusSuspended {
+			t.Errorf("returned status: got %q, want %q", suspended.Status, membership.MembershipStatusSuspended)
 		}
 
 		found, err := facade.FindMember(ctx, member.MemberId)
 		if err != nil {
 			t.Fatalf("FindMember failed: %v", err)
 		}
-		if found.Status != MembershipStatusSuspended {
-			t.Errorf("FindMember status: got %q, want %q", found.Status, MembershipStatusSuspended)
+		if found.Status != membership.MembershipStatusSuspended {
+			t.Errorf("FindMember status: got %q, want %q", found.Status, membership.MembershipStatusSuspended)
 		}
 	})
 
 	t.Run("reactivates a suspended member", func(t *testing.T) {
 		facade := buildFacade(t)
-		member := mustRegisterMember(t, facade, SampleNewMember())
+		member := mustRegisterMember(t, facade, membership.SampleNewMember())
 		if _, err := facade.Suspend(ctx, member.MemberId); err != nil {
 			t.Fatalf("Suspend failed: %v", err)
 		}
@@ -171,43 +178,43 @@ func TestMembershipFacade(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Reactivate failed: %v", err)
 		}
-		if reactivated.Status != MembershipStatusActive {
-			t.Errorf("returned status: got %q, want %q", reactivated.Status, MembershipStatusActive)
+		if reactivated.Status != membership.MembershipStatusActive {
+			t.Errorf("returned status: got %q, want %q", reactivated.Status, membership.MembershipStatusActive)
 		}
 
 		found, err := facade.FindMember(ctx, member.MemberId)
 		if err != nil {
 			t.Fatalf("FindMember failed: %v", err)
 		}
-		if found.Status != MembershipStatusActive {
-			t.Errorf("FindMember status: got %q, want %q", found.Status, MembershipStatusActive)
+		if found.Status != membership.MembershipStatusActive {
+			t.Errorf("FindMember status: got %q, want %q", found.Status, membership.MembershipStatusActive)
 		}
 	})
 
 	t.Run("upgrades a member tier from STANDARD to PREMIUM", func(t *testing.T) {
 		facade := buildFacade(t)
-		member := mustRegisterMember(t, facade, SampleNewMember())
+		member := mustRegisterMember(t, facade, membership.SampleNewMember())
 
-		upgraded, err := facade.UpgradeTier(ctx, member.MemberId, MembershipTierPremium)
+		upgraded, err := facade.UpgradeTier(ctx, member.MemberId, membership.MembershipTierPremium)
 		if err != nil {
 			t.Fatalf("UpgradeTier failed: %v", err)
 		}
-		if upgraded.Tier != MembershipTierPremium {
-			t.Errorf("returned tier: got %q, want %q", upgraded.Tier, MembershipTierPremium)
+		if upgraded.Tier != membership.MembershipTierPremium {
+			t.Errorf("returned tier: got %q, want %q", upgraded.Tier, membership.MembershipTierPremium)
 		}
 
 		found, err := facade.FindMember(ctx, member.MemberId)
 		if err != nil {
 			t.Fatalf("FindMember failed: %v", err)
 		}
-		if found.Tier != MembershipTierPremium {
-			t.Errorf("FindMember tier: got %q, want %q", found.Tier, MembershipTierPremium)
+		if found.Tier != membership.MembershipTierPremium {
+			t.Errorf("FindMember tier: got %q, want %q", found.Tier, membership.MembershipTierPremium)
 		}
 	})
 
 	t.Run("reports an active member as eligible", func(t *testing.T) {
 		facade := buildFacade(t)
-		member := mustRegisterMember(t, facade, SampleNewMember())
+		member := mustRegisterMember(t, facade, membership.SampleNewMember())
 
 		eligibility, err := facade.CheckEligibility(ctx, member.MemberId)
 		if err != nil {
@@ -223,7 +230,7 @@ func TestMembershipFacade(t *testing.T) {
 
 	t.Run("reports a suspended member as ineligible with reason SUSPENDED", func(t *testing.T) {
 		facade := buildFacade(t)
-		member := mustRegisterMember(t, facade, SampleNewMember())
+		member := mustRegisterMember(t, facade, membership.SampleNewMember())
 		if _, err := facade.Suspend(ctx, member.MemberId); err != nil {
 			t.Fatalf("Suspend failed: %v", err)
 		}
@@ -243,35 +250,35 @@ func TestMembershipFacade(t *testing.T) {
 	t.Run("rejects registering a member with an empty name", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.RegisterMember(ctx, SampleNewMember(WithName("")))
+		_, err := facade.RegisterMember(ctx, membership.SampleNewMember(membership.WithName("")))
 		assertInvalidMember(t, err)
 
-		_, err = facade.RegisterMember(ctx, SampleNewMember(WithName("   ")))
+		_, err = facade.RegisterMember(ctx, membership.SampleNewMember(membership.WithName("   ")))
 		assertInvalidMember(t, err)
 	})
 
 	t.Run("rejects registering a member with a malformed email", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.RegisterMember(ctx, SampleNewMember(WithEmail("")))
+		_, err := facade.RegisterMember(ctx, membership.SampleNewMember(membership.WithEmail("")))
 		assertInvalidMember(t, err)
 
-		_, err = facade.RegisterMember(ctx, SampleNewMember(WithEmail("not-an-email")))
+		_, err = facade.RegisterMember(ctx, membership.SampleNewMember(membership.WithEmail("not-an-email")))
 		assertInvalidMember(t, err)
 
-		_, err = facade.RegisterMember(ctx, SampleNewMember(WithEmail("missing@domain")))
+		_, err = facade.RegisterMember(ctx, membership.SampleNewMember(membership.WithEmail("missing@domain")))
 		assertInvalidMember(t, err)
 
-		_, err = facade.RegisterMember(ctx, SampleNewMember(WithEmail("two@@at.com")))
+		_, err = facade.RegisterMember(ctx, membership.SampleNewMember(membership.WithEmail("two@@at.com")))
 		assertInvalidMember(t, err)
 	})
 
 	t.Run("trims surrounding whitespace from name and email on registration", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		member, err := facade.RegisterMember(ctx, SampleNewMember(
-			WithName("  Ada Lovelace  "),
-			WithEmail("  ada@example.com  "),
+		member, err := facade.RegisterMember(ctx, membership.SampleNewMember(
+			membership.WithName("  Ada Lovelace  "),
+			membership.WithEmail("  ada@example.com  "),
 		))
 		if err != nil {
 			t.Fatalf("RegisterMember failed: %v", err)
@@ -286,37 +293,37 @@ func TestMembershipFacade(t *testing.T) {
 
 	t.Run("rejects registering a member with an email that already exists", func(t *testing.T) {
 		facade := buildFacade(t)
-		mustRegisterMember(t, facade, SampleNewMemberWithEmail("ada.lovelace@example.com"))
+		mustRegisterMember(t, facade, membership.SampleNewMemberWithEmail("ada.lovelace@example.com"))
 
-		_, err := facade.RegisterMember(ctx, SampleNewMemberWithEmail("ada.lovelace@example.com"))
+		_, err := facade.RegisterMember(ctx, membership.SampleNewMemberWithEmail("ada.lovelace@example.com"))
 		assertDuplicateEmail(t, err)
 	})
 
 	t.Run("throws MemberNotFoundError when suspending an unknown member", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.Suspend(ctx, MemberId("unknown-member-id"))
+		_, err := facade.Suspend(ctx, membership.MemberId("unknown-member-id"))
 		assertMemberNotFound(t, err)
 	})
 
 	t.Run("throws MemberNotFoundError when reactivating an unknown member", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.Reactivate(ctx, MemberId("unknown-member-id"))
+		_, err := facade.Reactivate(ctx, membership.MemberId("unknown-member-id"))
 		assertMemberNotFound(t, err)
 	})
 
 	t.Run("throws MemberNotFoundError when upgrading the tier of an unknown member", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.UpgradeTier(ctx, MemberId("unknown-member-id"), MembershipTierPremium)
+		_, err := facade.UpgradeTier(ctx, membership.MemberId("unknown-member-id"), membership.MembershipTierPremium)
 		assertMemberNotFound(t, err)
 	})
 
 	t.Run("throws MemberNotFoundError when checking eligibility of an unknown member", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.CheckEligibility(ctx, MemberId("unknown-member-id"))
+		_, err := facade.CheckEligibility(ctx, membership.MemberId("unknown-member-id"))
 		assertMemberNotFound(t, err)
 	})
 }

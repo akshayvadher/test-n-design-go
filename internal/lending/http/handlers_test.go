@@ -27,6 +27,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 )
 
@@ -71,7 +72,7 @@ func buildScene(t *testing.T) *testScene {
 		NewID:  sequentialIds("cat"),
 		Logger: logger,
 	})
-	membershipFacade := membership.NewFacadeWithOverrides(membership.Overrides{
+	membershipFacade := membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{
 		NewID:  sequentialIds("mem"),
 		Logger: logger,
 	})

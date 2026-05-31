@@ -1,4 +1,4 @@
-package membership
+package bun
 
 import (
 	"context"
@@ -6,45 +6,49 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/uptrace/bun"
+	upstreambun "github.com/uptrace/bun"
+
+	"github.com/akshayvadher/test-n-design-go/internal/membership"
 )
 
 // MemberRow is the bun-mapped persistent shape of a member. JSON tags are
-// intentionally absent — this struct never crosses the HTTP boundary; the
-// HTTP DTOs in internal/membership/http own that.
+// intentionally absent — this struct never crosses the HTTP boundary;
+// the HTTP DTOs in internal/membership/driving/http own that.
 //
 // Column names match migrations/0002_membership.sql verbatim.
 type MemberRow struct {
-	bun.BaseModel `bun:"table:members"`
+	upstreambun.BaseModel `bun:"table:members"`
 
-	MemberId MemberId         `bun:"member_id,pk"`
-	Name     string           `bun:"name,notnull"`
-	Email    string           `bun:"email,notnull,unique"`
-	Tier     MembershipTier   `bun:"tier,notnull"`
-	Status   MembershipStatus `bun:"status,notnull"`
+	MemberId membership.MemberId         `bun:"member_id,pk"`
+	Name     string                      `bun:"name,notnull"`
+	Email    string                      `bun:"email,notnull,unique"`
+	Tier     membership.MembershipTier   `bun:"tier,notnull"`
+	Status   membership.MembershipStatus `bun:"status,notnull"`
 }
 
-// BunRepository is the Postgres-backed Repository implementation. Every
-// method satisfies the same contract as InMemoryRepository: Find* returns
-// (nil, nil) on miss; non-nil errors signal infrastructure failure.
-type BunRepository struct {
-	db *bun.DB
+// Repository is the Postgres-backed membership.Repository implementation.
+// Every method satisfies the same contract as the in-memory Repository:
+// Find* returns (nil, nil) on miss; non-nil errors signal infrastructure
+// failure.
+type Repository struct {
+	db *upstreambun.DB
 }
 
-// Compile-time assertion that BunRepository satisfies Repository. If a
-// method signature drifts, the assertion fails before any test runs.
-var _ Repository = (*BunRepository)(nil)
+// Compile-time assertion that *Repository satisfies the membership
+// driven port. If a method signature drifts, the assertion fails before
+// any test runs.
+var _ membership.Repository = (*Repository)(nil)
 
-// NewBunRepository constructs a BunRepository bound to db. The caller owns
-// the *bun.DB lifecycle (open + close); BunRepository does not close it.
-func NewBunRepository(db *bun.DB) *BunRepository {
-	return &BunRepository{db: db}
+// NewRepository constructs a *Repository bound to db. The caller owns
+// the *bun.DB lifecycle (open + close); Repository does not close it.
+func NewRepository(db *upstreambun.DB) *Repository {
+	return &Repository{db: db}
 }
 
 // SaveMember upserts the member by primary key. Matches the TS source's
 // `onConflictDoUpdate` semantics: a save against an existing member_id
 // overwrites every column in place.
-func (r *BunRepository) SaveMember(ctx context.Context, member MemberDto) error {
+func (r *Repository) SaveMember(ctx context.Context, member membership.MemberDto) error {
 	row := toMemberRow(member)
 	_, err := r.db.NewInsert().
 		Model(&row).
@@ -62,7 +66,7 @@ func (r *BunRepository) SaveMember(ctx context.Context, member MemberDto) error 
 
 // FindMemberById returns the member row by primary key, or (nil, nil) on
 // miss.
-func (r *BunRepository) FindMemberById(ctx context.Context, memberId MemberId) (*MemberDto, error) {
+func (r *Repository) FindMemberById(ctx context.Context, memberId membership.MemberId) (*membership.MemberDto, error) {
 	var row MemberRow
 	err := r.db.NewSelect().Model(&row).Where("member_id = ?", memberId).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -76,7 +80,7 @@ func (r *BunRepository) FindMemberById(ctx context.Context, memberId MemberId) (
 }
 
 // FindMemberByEmail returns the member row by email, or (nil, nil) on miss.
-func (r *BunRepository) FindMemberByEmail(ctx context.Context, email string) (*MemberDto, error) {
+func (r *Repository) FindMemberByEmail(ctx context.Context, email string) (*membership.MemberDto, error) {
 	var row MemberRow
 	err := r.db.NewSelect().Model(&row).Where("email = ?", email).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -90,7 +94,7 @@ func (r *BunRepository) FindMemberByEmail(ctx context.Context, email string) (*M
 }
 
 // toMemberRow converts a domain MemberDto into the bun row.
-func toMemberRow(member MemberDto) MemberRow {
+func toMemberRow(member membership.MemberDto) MemberRow {
 	return MemberRow{
 		MemberId: member.MemberId,
 		Name:     member.Name,
@@ -101,8 +105,8 @@ func toMemberRow(member MemberDto) MemberRow {
 }
 
 // toMemberDto converts a bun row back into a domain MemberDto.
-func toMemberDto(row MemberRow) MemberDto {
-	return MemberDto{
+func toMemberDto(row MemberRow) membership.MemberDto {
+	return membership.MemberDto{
 		MemberId: row.MemberId,
 		Name:     row.Name,
 		Email:    row.Email,
