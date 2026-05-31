@@ -96,6 +96,15 @@ type Wired struct {
 	// facade right after a Borrow returns 201.
 	LendingFacade *lending.Facade
 
+	// AutoLoanConsumer is the saga subscriber that turns a LoanReturned into
+	// an auto-loan for the head-of-queue eligible reservation. It is Start()ed
+	// by Wire after route mounting and Stop()ped by Close before the DB is
+	// closed (so the consumer detaches from the bus before the substrate it
+	// writes through goes away). Integration tests can introspect it for
+	// lifecycle assertions, though the behavioural ACs already cover the
+	// observable outcome.
+	AutoLoanConsumer *lending.AutoLoanOnReturnConsumer
+
 	// FinesFacade is the fines module's facade. Integration tests use it
 	// to drive AssessFinesFor / ProcessOverdueLoans / PayFine against the
 	// same bun-backed repository the HTTP-driven writes hit.
@@ -115,8 +124,11 @@ type Wired struct {
 	// observable on the bus even with no consumer subscribed" criterion.
 	Bus events.EventBus
 
-	// Close releases every resource Wire allocated (currently: the bun DB
-	// connection pool). Callers MUST invoke Close on every path. Idempotent.
+	// Close stops every consumer Wire started and releases every resource
+	// Wire allocated (currently: the AutoLoanConsumer subscription, the bun
+	// DB connection pool, the redis client when wired). Consumers stop
+	// BEFORE the DB is closed so handlers do not run against a torn-down
+	// substrate. Callers MUST invoke Close on every path. Idempotent.
 	Close func() error
 }
 
@@ -129,6 +141,14 @@ type Wired struct {
 // own the *http.Server. Those concerns differ between the production binary
 // (configured port, SIGINT/SIGTERM, 10s shutdown) and integration tests
 // (free port via net.Listen, t.Cleanup teardown, 5s shutdown).
+//
+// Order of operations:
+//
+//  1. build deps (bun DB, book-cache, error registry, router, bus)
+//  2. build facades (catalog, membership, lending, fines, categories)
+//  3. wire HTTP routes for each module
+//  4. construct + Start consumers (AutoLoanOnReturnConsumer)
+//  5. return Wired with a Close that Stops consumers first, then closes DB
 //
 // On any failure Wire releases every resource it has already allocated and
 // returns a wrapped error. The returned *Wired is nil on error.
@@ -163,7 +183,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 
 	bus := events.NewInMemoryEventBus(deps.Logger)
 	accessControlFacade := accesscontrol.NewFacade()
-	lendingFacade := lending.WireBunFacade(
+	lendingWiring := lending.WireBunFacade(
 		bunDB,
 		bus,
 		catalogFacade,
@@ -171,6 +191,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 		accessControlFacade,
 		deps.Logger,
 	)
+	lendingFacade := lendingWiring.Facade
 	lendinghttp.Wire(router, lendinghttp.Deps{Facade: lendingFacade, Logger: deps.Logger})
 
 	finesConfig := loadFinesConfig()
@@ -190,16 +211,34 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	})
 	categorieshttp.Wire(router, categorieshttp.Deps{Facade: categoriesFacade, Logger: deps.Logger})
 
+	autoLoanConsumer := lending.NewAutoLoanOnReturnConsumer(lending.AutoLoanOnReturnConsumerDeps{
+		Bus:          bus,
+		Membership:   membershipFacade,
+		Reservations: lendingWiring.Reservations,
+		Lending:      lendingFacade,
+		TxFactory:    lendingWiring.TxFactory,
+		Clock:        time.Now,
+		Logger:       deps.Logger.With("component", "auto-loan-consumer"),
+	})
+	if err := autoLoanConsumer.Start(ctx); err != nil {
+		_ = bunDB.Close()
+		if redisClient != nil {
+			_ = redisClient.Close()
+		}
+		return nil, fmt.Errorf("start auto-loan consumer: %w", err)
+	}
+
 	return &Wired{
 		Router:           router,
 		DB:               bunDB,
 		CatalogFacade:    catalogFacade,
 		MembershipFacade: membershipFacade,
 		LendingFacade:    lendingFacade,
+		AutoLoanConsumer: autoLoanConsumer,
 		FinesFacade:      finesFacade,
 		CategoriesFacade: categoriesFacade,
 		Bus:              bus,
-		Close:            buildCloser(bunDB, redisClient),
+		Close:            buildCloser(autoLoanConsumer, bunDB, redisClient),
 	}, nil
 }
 
@@ -249,15 +288,22 @@ func buildBookCache(deps Deps) (bookcache.BookCacheGateway, *redis.Client, error
 	return bookcache.NewRedisBookCacheGateway(client, bookcache.DefaultRedisTTL, deps.Logger), client, nil
 }
 
-// buildCloser composes a Close function that releases both the bun DB pool
-// and (when present) the Redis client. Errors are joined so callers see every
-// failure rather than only the first.
-func buildCloser(bunDB *bun.DB, redisClient *redis.Client) func() error {
-	if redisClient == nil {
-		return bunDB.Close
-	}
+// buildCloser composes a Close function that stops the saga consumer first,
+// then releases the bun DB pool and (when present) the Redis client. Consumers
+// stop BEFORE the DB closes so handlers don't run against a torn-down
+// substrate. Errors are joined so callers see every failure rather than only
+// the first. Stop is bounded by a short context — the consumer's only
+// shutdown work is detaching from the bus, which is synchronous and cheap.
+func buildCloser(consumer *lending.AutoLoanOnReturnConsumer, bunDB *bun.DB, redisClient *redis.Client) func() error {
 	return func() error {
-		return errors.Join(bunDB.Close(), redisClient.Close())
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stopErr := consumer.Stop(stopCtx)
+		dbErr := bunDB.Close()
+		if redisClient == nil {
+			return errors.Join(stopErr, dbErr)
+		}
+		return errors.Join(stopErr, dbErr, redisClient.Close())
 	}
 }
 
