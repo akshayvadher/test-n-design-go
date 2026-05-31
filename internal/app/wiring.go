@@ -49,6 +49,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
 )
@@ -201,7 +202,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	)
 	membershiphttp.Wire(router, membershiphttp.Deps{Facade: membershipFacade, Logger: deps.Logger})
 
-	bus := events.NewInMemoryEventBus(deps.Logger)
+	bus := eventsmemory.NewBus(deps.Logger)
 	accessControlFacade := accesscontrol.NewFacade()
 	lendingWiring := lendingbun.WireFacade(
 		bunDB,

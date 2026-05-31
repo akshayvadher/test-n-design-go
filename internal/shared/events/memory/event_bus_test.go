@@ -8,11 +8,11 @@
 //   - multi-subscriber fanout: every registered handler is invoked once
 //   - handler error → error logged, fanout continues, Publish returns nil
 //   - handler panic → panic recovered + logged, fanout continues, Publish returns nil
-//   - Unsubscribe → handler is not invoked on subsequent Publish
-//   - Unsubscribe is idempotent (second call is a no-op)
+//   - events.Unsubscribe → handler is not invoked on subsequent Publish
+//   - events.Unsubscribe is idempotent (second call is a no-op)
 //   - no subscribers → Publish returns nil with no log noise
 //   - concurrent Publish from N goroutines is race-free (verified under -race)
-package events
+package memory
 
 import (
 	"bytes"
@@ -23,13 +23,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 )
 
 // -----------------------------------------------------------------------------
 // Test helpers
 // -----------------------------------------------------------------------------
 
-// testEvent is the synthetic DomainEvent used throughout this file. Declared
+// testEvent is the synthetic events.DomainEvent used throughout this file. Declared
 // locally so the test owns no business imports — events stays a stdlib-only
 // package per BOUNDARIES.md.
 type testEvent struct {
@@ -40,17 +42,17 @@ func (e testEvent) Type() string { return e.name }
 
 // newBusWithBuffer returns a bus whose logger writes to a buffer the test can
 // later inspect for the structured fields the spec mandates.
-func newBusWithBuffer(t *testing.T) (*InMemoryEventBus, *bytes.Buffer) {
+func newBusWithBuffer(t *testing.T) (*Bus, *bytes.Buffer) {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	return NewInMemoryEventBus(logger), buf
+	return NewBus(logger), buf
 }
 
 // recordingHandler returns a handler that appends its supplied index into
 // invocations. Used by order + fanout tests to assert the recorded sequence.
-func recordingHandler(invocations *[]int, index int) func(ctx context.Context, evt DomainEvent) error {
-	return func(ctx context.Context, evt DomainEvent) error {
+func recordingHandler(invocations *[]int, index int) func(ctx context.Context, evt events.DomainEvent) error {
+	return func(ctx context.Context, evt events.DomainEvent) error {
 		*invocations = append(*invocations, index)
 		return nil
 	}
@@ -100,7 +102,7 @@ func TestPublishContinuesAfterHandlerError(t *testing.T) {
 	var invocations []int
 
 	bus.Subscribe("test.event", recordingHandler(&invocations, 0))
-	bus.Subscribe("test.event", func(ctx context.Context, evt DomainEvent) error {
+	bus.Subscribe("test.event", func(ctx context.Context, evt events.DomainEvent) error {
 		invocations = append(invocations, 1)
 		return errors.New("boom")
 	})
@@ -130,7 +132,7 @@ func TestPublishRecoversHandlerPanic(t *testing.T) {
 	var invocations []int
 
 	bus.Subscribe("test.event", recordingHandler(&invocations, 0))
-	bus.Subscribe("test.event", func(ctx context.Context, evt DomainEvent) error {
+	bus.Subscribe("test.event", func(ctx context.Context, evt events.DomainEvent) error {
 		invocations = append(invocations, 1)
 		panic("boom-panic")
 	})
@@ -153,16 +155,16 @@ func TestPublishRecoversHandlerPanic(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Unsubscribe semantics (table-driven over the variants)
+// events.Unsubscribe semantics (table-driven over the variants)
 // -----------------------------------------------------------------------------
 
 func TestUnsubscribeStopsHandlerFromBeingInvoked(t *testing.T) {
 	cases := []struct {
 		name        string
-		unsubscribe func(unsub Unsubscribe)
+		unsubscribe func(unsub events.Unsubscribe)
 	}{
-		{name: "single unsubscribe", unsubscribe: func(u Unsubscribe) { u() }},
-		{name: "double unsubscribe is idempotent", unsubscribe: func(u Unsubscribe) { u(); u() }},
+		{name: "single unsubscribe", unsubscribe: func(u events.Unsubscribe) { u() }},
+		{name: "double unsubscribe is idempotent", unsubscribe: func(u events.Unsubscribe) { u(); u() }},
 	}
 
 	for _, tc := range cases {
@@ -205,11 +207,11 @@ func TestPublishWithNoSubscribersIsNoOp(t *testing.T) {
 func TestSubscribeToUnusedEventTypeReturnsNoOpUnsubscribe(t *testing.T) {
 	bus, _ := newBusWithBuffer(t)
 
-	unsub := bus.Subscribe("never.fires", func(ctx context.Context, evt DomainEvent) error {
+	unsub := bus.Subscribe("never.fires", func(ctx context.Context, evt events.DomainEvent) error {
 		return nil
 	})
 
-	// Calling Unsubscribe before any Publish must not panic and must be safe.
+	// Calling events.Unsubscribe before any Publish must not panic and must be safe.
 	unsub()
 	unsub()
 }
@@ -229,7 +231,7 @@ func TestConcurrentPublishIsSafe(t *testing.T) {
 	bus, _ := newBusWithBuffer(t)
 	var counter atomic.Int64
 
-	bus.Subscribe("concurrent.event", func(ctx context.Context, evt DomainEvent) error {
+	bus.Subscribe("concurrent.event", func(ctx context.Context, evt events.DomainEvent) error {
 		counter.Add(1)
 		return nil
 	})

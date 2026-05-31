@@ -33,6 +33,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
 )
 
@@ -66,7 +67,7 @@ type scene struct {
 	facade     *lending.Facade
 	catalog    *catalog.Facade
 	membership *membership.Facade
-	bus        *events.InMemoryEventBus
+	bus        *eventsmemory.Bus
 	loans      *lendingmemory.LoanRepository
 	collected  *collectedEvents
 }
@@ -152,11 +153,11 @@ func buildSceneWith(t *testing.T, extra lendingmemory.Overrides) *scene {
 	}
 
 	bus := extra.Bus
-	var inMemoryBus *events.InMemoryEventBus
+	var inMemoryBus *eventsmemory.Bus
 	if bus == nil {
-		inMemoryBus = events.NewInMemoryEventBus(logger)
+		inMemoryBus = eventsmemory.NewBus(logger)
 		bus = inMemoryBus
-	} else if asInMem, ok := bus.(*events.InMemoryEventBus); ok {
+	} else if asInMem, ok := bus.(*eventsmemory.Bus); ok {
 		inMemoryBus = asInMem
 	}
 
@@ -1202,13 +1203,13 @@ func (t *throwingOnceReservationRepository) ListPendingReservationsForBook(ctx c
 type flakyBus struct {
 	mu        sync.Mutex
 	failTypes map[string]error
-	delegate  *events.InMemoryEventBus
+	delegate  *eventsmemory.Bus
 }
 
 func newFlakyBus(logger *slog.Logger) *flakyBus {
 	return &flakyBus{
 		failTypes: map[string]error{},
-		delegate:  events.NewInMemoryEventBus(logger),
+		delegate:  eventsmemory.NewBus(logger),
 	}
 }
 

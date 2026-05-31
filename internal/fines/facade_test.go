@@ -33,6 +33,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -119,7 +120,7 @@ type scene struct {
 	membership *membership.Facade
 	catalog    *catalog.Facade
 	repository *finesmemory.Repository
-	bus        *events.InMemoryEventBus
+	bus        *eventsmemory.Bus
 	collected  *collectedEvents
 	clock      *mutableClock
 	config     fines.FinesConfig
@@ -143,7 +144,7 @@ func buildScene(t *testing.T, opts ...func(*sceneOpts)) *scene {
 
 	logger := silentLogger()
 	clock := newMutableClock(fixedNow)
-	bus := events.NewInMemoryEventBus(logger)
+	bus := eventsmemory.NewBus(logger)
 
 	catalogFacade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:  sequentialIds("cat"),

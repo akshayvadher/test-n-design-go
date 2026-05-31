@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -55,7 +56,7 @@ func silentLogger() *slog.Logger {
 // captureEvents subscribes a recording handler against the supplied event
 // types on bus, returning the appended slice (read after Run returns) and an
 // unsubscribe helper for tests that care about teardown ordering.
-func captureEvents(t *testing.T, bus *events.InMemoryEventBus, types ...string) *[]events.DomainEvent {
+func captureEvents(t *testing.T, bus *eventsmemory.Bus, types ...string) *[]events.DomainEvent {
 	t.Helper()
 	var (
 		captured []events.DomainEvent
@@ -80,7 +81,7 @@ func captureEvents(t *testing.T, bus *events.InMemoryEventBus, types ...string) 
 // failOn, where it returns the supplied error WITHOUT delegating. Subscribe
 // passes through unchanged so handler registration still works.
 type flakyBus struct {
-	inner  *events.InMemoryEventBus
+	inner  *eventsmemory.Bus
 	failOn string
 	err    error
 }
@@ -127,7 +128,7 @@ func (h *recordingHandler) snapshot() []slog.Record {
 // -----------------------------------------------------------------------------
 
 func TestInMemory_HappyPath_StageAndEventCommitAndPublish(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 
@@ -152,7 +153,7 @@ func TestInMemory_HappyPath_StageAndEventCommitAndPublish(t *testing.T) {
 }
 
 func TestInMemory_WorkError_DiscardsStagesAndEvents(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 
@@ -179,7 +180,7 @@ func TestInMemory_WorkError_DiscardsStagesAndEvents(t *testing.T) {
 }
 
 func TestInMemory_StageOrderPreservedAtCommit(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	ctx := context.Background()
 
 	var order []int
@@ -198,7 +199,7 @@ func TestInMemory_StageOrderPreservedAtCommit(t *testing.T) {
 }
 
 func TestInMemory_StageEventOrderPreserved(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "E1", "E2", "E3")
 	ctx := context.Background()
 
@@ -220,7 +221,7 @@ func TestInMemory_StageEventOrderPreserved(t *testing.T) {
 }
 
 func TestInMemory_WritesHappenBeforeEvents(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	var journal []string
 	bus.Subscribe("TestEvent", func(_ context.Context, _ events.DomainEvent) error {
 		journal = append(journal, "event")
@@ -242,7 +243,7 @@ func TestInMemory_WritesHappenBeforeEvents(t *testing.T) {
 }
 
 func TestInMemory_StageClosureError_AbortsCommit(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 
@@ -269,7 +270,7 @@ func TestInMemory_StageClosureError_AbortsCommit(t *testing.T) {
 }
 
 func TestInMemory_BusPublishFailure_DoesNotRollback(t *testing.T) {
-	inner := events.NewInMemoryEventBus(silentLogger())
+	inner := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, inner, "Ok")
 	publishErr := errors.New("bus down")
 	bus := &flakyBus{inner: inner, failOn: "Flaky", err: publishErr}
@@ -329,7 +330,7 @@ func collectAttrs(record slog.Record) map[string]any {
 }
 
 func TestInMemory_MultipleEventTypes_AllPublish(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "A", "B", "C")
 	ctx := context.Background()
 
@@ -347,7 +348,7 @@ func TestInMemory_MultipleEventTypes_AllPublish(t *testing.T) {
 }
 
 func TestInMemory_EmptyRun_NoSideEffects(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 
@@ -361,7 +362,7 @@ func TestInMemory_EmptyRun_NoSideEffects(t *testing.T) {
 }
 
 func TestInMemory_StageEventOnly_StillPublishes(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 
@@ -376,7 +377,7 @@ func TestInMemory_StageEventOnly_StillPublishes(t *testing.T) {
 }
 
 func TestInMemory_StageOnly_StillCommits(t *testing.T) {
-	bus := events.NewInMemoryEventBus(silentLogger())
+	bus := eventsmemory.NewBus(silentLogger())
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 

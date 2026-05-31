@@ -38,6 +38,7 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/test/containers"
 )
 
@@ -73,7 +74,7 @@ const truncateWidgetsSQL = `TRUNCATE TABLE tx_test_widgets`
 // setupBunTx boots a postgres testcontainer, wires a *bun.DB through the
 // project's NewBunDB, creates the fixture table, and registers cleanup that
 // drops it. Returns the live db handle and a bus the test can inspect.
-func setupBunTx(t *testing.T) (*bun.DB, *events.InMemoryEventBus) {
+func setupBunTx(t *testing.T) (*bun.DB, *eventsmemory.Bus) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -95,7 +96,7 @@ func setupBunTx(t *testing.T) (*bun.DB, *events.InMemoryEventBus) {
 		t.Fatalf("create tx_test_widgets: %v", err)
 	}
 
-	bus := events.NewInMemoryEventBus(txTestLogger())
+	bus := eventsmemory.NewBus(txTestLogger())
 	return bunDB, bus
 }
 
@@ -159,7 +160,7 @@ func widgetExists(t *testing.T, bunDB *bun.DB, id string) bool {
 // file. Returns the supplied error when an event of type failOn is published;
 // delegates every other publish + every Subscribe to the inner bus.
 type flakyBunBus struct {
-	inner  *events.InMemoryEventBus
+	inner  *eventsmemory.Bus
 	failOn string
 	err    error
 }
@@ -177,7 +178,7 @@ func (b *flakyBunBus) Subscribe(eventType string, handler func(ctx context.Conte
 
 // capturedSink records every event the bus delivers to subscribers it is
 // attached to. The slice is read after Run returns.
-func capturedSink(t *testing.T, bus *events.InMemoryEventBus, types ...string) *[]events.DomainEvent {
+func capturedSink(t *testing.T, bus *eventsmemory.Bus, types ...string) *[]events.DomainEvent {
 	t.Helper()
 	var (
 		got []events.DomainEvent

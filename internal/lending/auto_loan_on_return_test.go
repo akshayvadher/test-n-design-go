@@ -32,6 +32,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
 )
 
@@ -50,7 +51,7 @@ type consumerScene struct {
 	consumer     *lending.AutoLoanOnReturnConsumer
 	catalog      *catalog.Facade
 	membership   *membership.Facade
-	bus          *events.InMemoryEventBus
+	bus          *eventsmemory.Bus
 	loans        lending.LoanRepository
 	loansMem     *lendingmemory.LoanRepository
 	reservations lending.ReservationRepository
@@ -99,7 +100,7 @@ func buildConsumerScene(t *testing.T, opts consumerSceneOpts) *consumerScene {
 		reservationsRepo = lendingmemory.NewReservationRepository()
 	}
 
-	bus := events.NewInMemoryEventBus(logger)
+	bus := eventsmemory.NewBus(logger)
 	txFactory := func() tx.TransactionalContext {
 		return tx.NewInMemoryTransactionalContext(bus, logger)
 	}

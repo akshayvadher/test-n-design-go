@@ -14,6 +14,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
 )
 
@@ -76,7 +77,7 @@ func NewFacadeWithOverrides(o Overrides) *lending.Facade {
 	}
 	bus := o.Bus
 	if bus == nil {
-		bus = events.NewInMemoryEventBus(logger)
+		bus = eventsmemory.NewBus(logger)
 	}
 	txFactory := o.TxFactory
 	if txFactory == nil {

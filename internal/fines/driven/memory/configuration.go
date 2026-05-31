@@ -13,6 +13,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 )
 
 // Overrides is the test-substitution extension point for the fines
@@ -58,7 +59,7 @@ func NewFacadeWithOverrides(o Overrides) *fines.Facade {
 	}
 	bus := o.Bus
 	if bus == nil {
-		bus = events.NewInMemoryEventBus(logger)
+		bus = eventsmemory.NewBus(logger)
 	}
 	config := fines.DefaultConfig()
 	if o.Config != nil {
