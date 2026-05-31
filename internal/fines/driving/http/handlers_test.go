@@ -26,6 +26,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
+	finesmemory "github.com/akshayvadher/test-n-design-go/internal/fines/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
@@ -95,7 +96,7 @@ func buildScene(t *testing.T) *testScene {
 		Clock:      clock.read,
 		Logger:     logger,
 	})
-	finesFacade := fines.NewFacadeWithOverrides(fines.Overrides{
+	finesFacade := finesmemory.NewFacadeWithOverrides(finesmemory.Overrides{
 		Lending:    lendingFacade,
 		Membership: membershipFacade,
 		NewID:      sequentialIds("fine"),

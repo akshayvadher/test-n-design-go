@@ -36,7 +36,8 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/chat"
 	chathttp "github.com/akshayvadher/test-n-design-go/internal/chat/http"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
-	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/http"
+	finesbun "github.com/akshayvadher/test-n-design-go/internal/fines/driven/bun"
+	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/http"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
@@ -206,14 +207,16 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	lendinghttp.Wire(router, lendinghttp.Deps{Facade: lendingFacade, Logger: deps.Logger})
 
 	finesConfig := loadFinesConfig()
-	finesFacade := fines.NewFacadeWithOverrides(fines.Overrides{
-		Lending:    lendingFacade,
-		Membership: membershipFacade,
-		Repository: fines.NewBunFineRepository(bunDB),
-		Bus:        bus,
-		Config:     &finesConfig,
-		Logger:     deps.Logger,
-	})
+	finesFacade := fines.NewFacade(
+		lendingFacade,
+		membershipFacade,
+		finesbun.NewRepository(bunDB),
+		bus,
+		finesConfig,
+		uuid.NewString,
+		time.Now,
+		deps.Logger,
+	)
 	fineshttp.Wire(router, fineshttp.Deps{Facade: finesFacade, Logger: deps.Logger, Clock: time.Now})
 
 	categoriesFacade := categories.NewFacade(

@@ -1,4 +1,4 @@
-package fines
+package bun
 
 import (
 	"context"
@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/uptrace/bun"
+	upstreambun "github.com/uptrace/bun"
 
+	"github.com/akshayvadher/test-n-design-go/internal/fines"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 )
@@ -27,42 +28,42 @@ func isInvalidUUIDSyntax(err error) bool {
 }
 
 // FineRow is the bun-mapped persistent shape of a fine. JSON tags are
-// intentionally absent — this struct never crosses the HTTP boundary; the
-// HTTP DTOs in internal/fines/http own that.
+// intentionally absent — this struct never crosses the HTTP boundary;
+// the HTTP DTOs in internal/fines/driving/http own that.
 //
 // Column names match migrations/0004_fines.sql verbatim. PaidAt is a
 // pointer for the "unpaid" sentinel (matches FineDto).
 type FineRow struct {
-	bun.BaseModel `bun:"table:fines"`
+	upstreambun.BaseModel `bun:"table:fines"`
 
-	FineId      FineId              `bun:"fine_id,pk"`
+	FineId      fines.FineId        `bun:"fine_id,pk"`
 	MemberId    membership.MemberId `bun:"member_id,notnull"`
 	LoanId      lending.LoanId      `bun:"loan_id,notnull"`
-	AmountCents AmountCents         `bun:"amount_cents,notnull"`
+	AmountCents fines.AmountCents   `bun:"amount_cents,notnull"`
 	AssessedAt  time.Time           `bun:"assessed_at,notnull"`
 	PaidAt      *time.Time          `bun:"paid_at"`
 }
 
-// BunFineRepository is the Postgres-backed FineRepository implementation.
+// Repository is the Postgres-backed fines.FineRepository implementation.
 // Writes run directly against the base *bun.DB — fines does NOT integrate
 // with TransactionalContext (Open Question 2: single-aggregate per fine,
 // no event-with-write atomicity required).
-type BunFineRepository struct {
-	db *bun.DB
+type Repository struct {
+	db *upstreambun.DB
 }
 
-// Compile-time assertion that BunFineRepository satisfies FineRepository.
-var _ FineRepository = (*BunFineRepository)(nil)
+// Compile-time assertion that *Repository satisfies the fines driven port.
+var _ fines.FineRepository = (*Repository)(nil)
 
-// NewBunFineRepository constructs a BunFineRepository bound to db. The
-// caller owns the *bun.DB lifecycle.
-func NewBunFineRepository(db *bun.DB) *BunFineRepository {
-	return &BunFineRepository{db: db}
+// NewRepository constructs a *Repository bound to db. The caller owns the
+// *bun.DB lifecycle.
+func NewRepository(db *upstreambun.DB) *Repository {
+	return &Repository{db: db}
 }
 
 // SaveFine upserts the fine by fine_id. The upsert lets PayFine overwrite
 // PaidAt without re-routing through a separate UPDATE statement.
-func (r *BunFineRepository) SaveFine(ctx context.Context, fine FineDto) error {
+func (r *Repository) SaveFine(ctx context.Context, fine fines.FineDto) error {
 	row := toFineRow(fine)
 	_, err := r.db.NewInsert().
 		Model(&row).
@@ -80,7 +81,7 @@ func (r *BunFineRepository) SaveFine(ctx context.Context, fine FineDto) error {
 }
 
 // FindFineById returns the fine by primary key, or (nil, nil) on miss.
-func (r *BunFineRepository) FindFineById(ctx context.Context, fineId FineId) (*FineDto, error) {
+func (r *Repository) FindFineById(ctx context.Context, fineId fines.FineId) (*fines.FineDto, error) {
 	var row FineRow
 	err := r.db.NewSelect().Model(&row).Where("fine_id = ?", fineId).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) || isInvalidUUIDSyntax(err) {
@@ -96,7 +97,7 @@ func (r *BunFineRepository) FindFineById(ctx context.Context, fineId FineId) (*F
 // FindFineByLoanId returns the first fine for the given loan, or
 // (nil, nil) on miss. The "at most one fine per loan" invariant is
 // enforced at the facade layer; this query LIMITs to 1 defensively.
-func (r *BunFineRepository) FindFineByLoanId(ctx context.Context, loanId lending.LoanId) (*FineDto, error) {
+func (r *Repository) FindFineByLoanId(ctx context.Context, loanId lending.LoanId) (*fines.FineDto, error) {
 	var row FineRow
 	err := r.db.NewSelect().Model(&row).Where("loan_id = ?", loanId).Limit(1).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -111,7 +112,7 @@ func (r *BunFineRepository) FindFineByLoanId(ctx context.Context, loanId lending
 
 // ListFinesForMember returns the fines whose member_id matches, ordered
 // by fine_id ASC for in-memory/bun parity.
-func (r *BunFineRepository) ListFinesForMember(ctx context.Context, memberId membership.MemberId) ([]FineDto, error) {
+func (r *Repository) ListFinesForMember(ctx context.Context, memberId membership.MemberId) ([]fines.FineDto, error) {
 	var rows []FineRow
 	err := r.db.NewSelect().
 		Model(&rows).
@@ -121,7 +122,7 @@ func (r *BunFineRepository) ListFinesForMember(ctx context.Context, memberId mem
 	if err != nil {
 		return nil, fmt.Errorf("list fines for member %q: %w", memberId, err)
 	}
-	out := make([]FineDto, 0, len(rows))
+	out := make([]fines.FineDto, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, toFineDto(row))
 	}
@@ -131,7 +132,7 @@ func (r *BunFineRepository) ListFinesForMember(ctx context.Context, memberId mem
 // toFineRow projects a domain FineDto into the bun row. The PaidAt pointer
 // propagates as-is; nil maps to NULL in Postgres via bun's nullable column
 // handling.
-func toFineRow(fine FineDto) FineRow {
+func toFineRow(fine fines.FineDto) FineRow {
 	return FineRow{
 		FineId:      fine.FineId,
 		MemberId:    fine.MemberId,
@@ -143,8 +144,8 @@ func toFineRow(fine FineDto) FineRow {
 }
 
 // toFineDto projects a bun row back into a domain FineDto.
-func toFineDto(row FineRow) FineDto {
-	return FineDto{
+func toFineDto(row FineRow) fines.FineDto {
+	return fines.FineDto{
 		FineId:      row.FineId,
 		MemberId:    row.MemberId,
 		LoanId:      row.LoanId,
