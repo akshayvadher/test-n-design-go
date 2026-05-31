@@ -1,0 +1,27 @@
+# Manual HTTP probes for the fines module (Phase 4 / Slice 4).
+#
+# How to use:
+#   1. Start the server with `task run`.
+#   2. Open this file in JetBrains GoLand/IntelliJ or VSCode with the
+#      REST Client extension installed.
+#   3. Click the gutter icon next to a request to send it.
+#
+# Substitute <memberId> / <fineId> after the corresponding endpoints
+# return them (or look them up via `psql` against the dev database).
+
+@baseUrl = http://localhost:3000
+
+### POST {{baseUrl}}/members/<memberId>/fines/assessments — fine all overdue loans for a member
+POST {{baseUrl}}/members/<memberId>/fines/assessments
+
+### POST {{baseUrl}}/fines/batch/process — assess every overdue loan, auto-suspend when threshold crossed
+POST {{baseUrl}}/fines/batch/process
+
+### GET {{baseUrl}}/members/<memberId>/fines — list all fines for a member
+GET {{baseUrl}}/members/<memberId>/fines
+
+### GET {{baseUrl}}/fines/<fineId> — read a single fine
+GET {{baseUrl}}/fines/<fineId>
+
+### PATCH {{baseUrl}}/fines/<fineId>/paid — mark a fine paid
+PATCH {{baseUrl}}/fines/<fineId>/paid

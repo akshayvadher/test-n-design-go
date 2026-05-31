@@ -18,6 +18,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
@@ -26,6 +29,8 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
+	"github.com/akshayvadher/test-n-design-go/internal/fines"
+	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/http"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/http"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
@@ -88,6 +93,11 @@ type Wired struct {
 	// copy to UNAVAILABLE after Borrow) by calling FindCopy via the catalog
 	// facade right after a Borrow returns 201.
 	LendingFacade *lending.Facade
+
+	// FinesFacade is the fines module's facade. Integration tests use it
+	// to drive AssessFinesFor / ProcessOverdueLoans / PayFine against the
+	// same bun-backed repository the HTTP-driven writes hit.
+	FinesFacade *fines.Facade
 
 	// Bus is the in-process event bus the lending facade publishes
 	// LoanOpened / LoanReturned / ReservationQueued events through.
@@ -154,15 +164,56 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	)
 	lendinghttp.Wire(router, lendinghttp.Deps{Facade: lendingFacade, Logger: deps.Logger})
 
+	finesConfig := loadFinesConfig()
+	finesFacade := fines.NewFacadeWithOverrides(fines.Overrides{
+		Lending:    lendingFacade,
+		Membership: membershipFacade,
+		Repository: fines.NewBunFineRepository(bunDB),
+		Bus:        bus,
+		Config:     &finesConfig,
+		Logger:     deps.Logger,
+	})
+	fineshttp.Wire(router, fineshttp.Deps{Facade: finesFacade, Logger: deps.Logger, Clock: time.Now})
+
 	return &Wired{
 		Router:           router,
 		DB:               bunDB,
 		CatalogFacade:    catalogFacade,
 		MembershipFacade: membershipFacade,
 		LendingFacade:    lendingFacade,
+		FinesFacade:      finesFacade,
 		Bus:              bus,
 		Close:            buildCloser(bunDB, redisClient),
 	}, nil
+}
+
+// loadFinesConfig reads the fines module's two policy knobs from the
+// environment, falling back to the locked defaults from
+// internal/fines/configuration.go. The two variables are:
+//
+//   - FINES_DAILY_RATE_CENTS         (default 25)
+//   - FINES_SUSPENSION_THRESHOLD_CENTS (default 1000)
+//
+// Non-numeric values are ignored and the default is used (matches the
+// "silent fallback only when the value is missing" Phase-1 config style;
+// fines is non-critical enough that a typo in the env doesn't need to
+// crash the whole binary).
+func loadFinesConfig() fines.FinesConfig {
+	cfg := fines.FinesConfig{
+		DailyRateCents:           fines.DefaultDailyRateCents,
+		SuspensionThresholdCents: fines.DefaultSuspensionThresholdCents,
+	}
+	if raw, ok := os.LookupEnv("FINES_DAILY_RATE_CENTS"); ok {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			cfg.DailyRateCents = fines.AmountCents(n)
+		}
+	}
+	if raw, ok := os.LookupEnv("FINES_SUSPENSION_THRESHOLD_CENTS"); ok {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			cfg.SuspensionThresholdCents = fines.AmountCents(n)
+		}
+	}
+	return cfg
 }
 
 // buildBookCache constructs the BookCacheGateway the catalog facade depends on.
@@ -216,6 +267,9 @@ func buildDomainErrorRegistry() *sharedhttp.DomainErrorRegistry {
 	registry.Register(&lending.BorrowValidationError{}, http.StatusBadRequest, "invalid_borrow")
 	registry.Register(&lending.ReserveValidationError{}, http.StatusBadRequest, "invalid_reserve")
 	registry.Register(&lending.ReturnLoanValidationError{}, http.StatusBadRequest, "invalid_return")
+	registry.Register(&fines.FineNotFoundError{}, http.StatusNotFound, "fine_not_found")
+	registry.Register(&fines.FineAlreadyPaidError{}, http.StatusConflict, "fine_already_paid")
+	registry.Register(&fines.InvalidFineError{}, http.StatusBadRequest, "invalid_fine")
 	return registry
 }
 

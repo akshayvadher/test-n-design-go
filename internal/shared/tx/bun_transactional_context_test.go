@@ -1,7 +1,7 @@
 //go:build integration
 
 // bun_transactional_context_test.go covers Slice 2's bun-substrate atomicity
-// ACs against a real Postgres via test/support.StartPostgres. Stdlib testing
+// ACs against a real Postgres via test/containers.StartPostgres. Stdlib testing
 // only; spec-local decorators (flakyBunBus, recordingHandler) and a tiny
 // inline tx_test_widgets table (created/torn-down per test, NOT a migration)
 // keep the fixture out of the production schema.
@@ -38,7 +38,7 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
-	"github.com/akshayvadher/test-n-design-go/test/support"
+	"github.com/akshayvadher/test-n-design-go/test/containers"
 )
 
 // -----------------------------------------------------------------------------
@@ -77,7 +77,7 @@ func setupBunTx(t *testing.T) (*bun.DB, *events.InMemoryEventBus) {
 	t.Helper()
 	ctx := context.Background()
 
-	pg := support.StartPostgres(ctx, t)
+	pg := containers.StartPostgres(ctx, t)
 	bunDB, err := db.NewBunDB(ctx, pg.URL, db.PoolConfig{}, txTestLogger())
 	if err != nil {
 		t.Fatalf("NewBunDB: %v", err)
