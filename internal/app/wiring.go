@@ -46,6 +46,8 @@ import (
 	membershipbun "github.com/akshayvadher/test-n-design-go/internal/membership/driven/bun"
 	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
+	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
+	bookcacheredis "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/redis"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
@@ -69,7 +71,7 @@ type Deps struct {
 
 	// RedisURL is the Redis DSN (e.g. redis://localhost:6379/0). When set,
 	// Wire constructs a *redis.Client and wires the catalog facade with a
-	// bookcache.NewRedisBookCacheGateway. Empty means "use the in-memory
+	// bookcacheredis.NewCache. Empty means "use the in-memory
 	// cache" — the unit-test and Phase-1-style integration paths can omit
 	// Redis entirely without touching the network.
 	RedisURL string
@@ -307,14 +309,14 @@ func loadFinesConfig() fines.FinesConfig {
 // the unit-test and Phase-1-style integration paths skip Redis entirely.
 func buildBookCache(deps Deps) (bookcache.BookCacheGateway, *redis.Client, error) {
 	if deps.RedisURL == "" {
-		return bookcache.NewInMemoryBookCacheGateway(), nil, nil
+		return bookcachememory.NewCache(), nil, nil
 	}
 	opts, err := redis.ParseURL(deps.RedisURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse redis url: %w", err)
 	}
 	client := redis.NewClient(opts)
-	return bookcache.NewRedisBookCacheGateway(client, bookcache.DefaultRedisTTL, deps.Logger), client, nil
+	return bookcacheredis.NewCache(client, bookcacheredis.DefaultTTL, deps.Logger), client, nil
 }
 
 // buildCloser composes a Close function that stops the saga consumer first,

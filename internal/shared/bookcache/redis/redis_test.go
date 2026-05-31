@@ -15,7 +15,7 @@
 //
 // Build-tag gated: `task test` (the unit suite) ignores this file
 // entirely. Run with `task test:integration`.
-package bookcache
+package redis
 
 import (
 	"context"
@@ -24,8 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	upstreamredis "github.com/redis/go-redis/v9"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
+
+	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 )
 
 // redisImage is the Redis container image pinned to compose.yaml's
@@ -41,19 +43,19 @@ const containerTerminateTimeout = 30 * time.Second
 // Test substrate helpers.
 // -----------------------------------------------------------------------------
 
-// newRedisGatewayForTest spins up a redis container, opens a *redis.Client,
+// newRedisGatewayForTest spins up a redis container, opens a *upstreamredis.Client,
 // constructs the gateway with the supplied TTL, registers Close on
 // t.Cleanup, and returns the gateway. ttl=0 lets the gateway fall back to
-// DefaultRedisTTL.
-func newRedisGatewayForTest(ctx context.Context, t *testing.T, ttl time.Duration) *RedisBookCacheGateway {
+// DefaultTTL.
+func newRedisGatewayForTest(ctx context.Context, t *testing.T, ttl time.Duration) *Cache {
 	t.Helper()
 	url := startRedisContainer(ctx, t)
 
-	opts, err := redis.ParseURL(url)
+	opts, err := upstreamredis.ParseURL(url)
 	if err != nil {
 		t.Fatalf("parse redis url %q: %v", url, err)
 	}
-	client := redis.NewClient(opts)
+	client := upstreamredis.NewClient(opts)
 	t.Cleanup(func() {
 		if err := client.Close(); err != nil {
 			t.Logf("close redis client: %v", err)
@@ -64,7 +66,7 @@ func newRedisGatewayForTest(ctx context.Context, t *testing.T, ttl time.Duration
 		t.Fatalf("ping redis: %v", err)
 	}
 
-	return NewRedisBookCacheGateway(client, ttl, discardLogger())
+	return NewCache(client, ttl, discardLogger())
 }
 
 // startRedisContainer launches a redis container, registers cleanup on
@@ -99,7 +101,7 @@ func discardLogger() *slog.Logger {
 
 // equalBookDto compares two BookDtos for round-trip equality without pulling
 // in a third-party assertion library. Authors are compared element-wise.
-func equalBookDto(a, b BookDto) bool {
+func equalBookDto(a, b bookcache.BookDto) bool {
 	if a.BookId != b.BookId || a.Title != b.Title || a.Isbn != b.Isbn {
 		return false
 	}
@@ -121,7 +123,7 @@ func equalBookDto(a, b BookDto) bool {
 func TestRedisBookCacheGateway_SetThenGet_RoundTripsBookDto(t *testing.T) {
 	ctx := context.Background()
 	cache := newRedisGatewayForTest(ctx, t, 0)
-	want := BookDto{
+	want := bookcache.BookDto{
 		BookId:  "b-1",
 		Title:   "The Pragmatic Programmer",
 		Authors: []string{"Andrew Hunt", "David Thomas"},
@@ -169,7 +171,7 @@ func TestRedisBookCacheGateway_Get_MissReturnsNilNil(t *testing.T) {
 func TestRedisBookCacheGateway_Evict_RemovesExistingEntry(t *testing.T) {
 	ctx := context.Background()
 	cache := newRedisGatewayForTest(ctx, t, 0)
-	stored := BookDto{BookId: "b-1", Title: "T", Isbn: "isbn-1"}
+	stored := bookcache.BookDto{BookId: "b-1", Title: "T", Isbn: "isbn-1"}
 	if err := cache.Set(ctx, stored.Isbn, stored); err != nil {
 		t.Fatalf("Set: got error %v, want nil", err)
 	}
@@ -207,8 +209,8 @@ func TestRedisBookCacheGateway_Evict_MissingKeyIsNoOp(t *testing.T) {
 func TestRedisBookCacheGateway_Set_OverwritesExistingEntry(t *testing.T) {
 	ctx := context.Background()
 	cache := newRedisGatewayForTest(ctx, t, 0)
-	first := BookDto{BookId: "b-1", Title: "First", Isbn: "isbn-1"}
-	second := BookDto{BookId: "b-1", Title: "Second", Authors: []string{"A"}, Isbn: "isbn-1"}
+	first := bookcache.BookDto{BookId: "b-1", Title: "First", Isbn: "isbn-1"}
+	second := bookcache.BookDto{BookId: "b-1", Title: "Second", Authors: []string{"A"}, Isbn: "isbn-1"}
 
 	if err := cache.Set(ctx, "isbn-1", first); err != nil {
 		t.Fatalf("Set first: got error %v, want nil", err)
@@ -238,7 +240,7 @@ func TestRedisBookCacheGateway_Set_OverwritesExistingEntry(t *testing.T) {
 func TestRedisBookCacheGateway_Set_HonorsConfiguredTTL(t *testing.T) {
 	ctx := context.Background()
 	cache := newRedisGatewayForTest(ctx, t, 1*time.Second)
-	book := BookDto{BookId: "b-1", Isbn: "isbn-ttl"}
+	book := bookcache.BookDto{BookId: "b-1", Isbn: "isbn-ttl"}
 
 	if err := cache.Set(ctx, book.Isbn, book); err != nil {
 		t.Fatalf("Set: got error %v, want nil", err)

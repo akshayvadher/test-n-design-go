@@ -26,6 +26,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
+	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
 )
 
@@ -95,9 +96,9 @@ func buildFacadeWithGateway(t *testing.T, seed map[string]isbngateway.BookMetada
 // buildCacheScene constructs a catalog.Facade with a fresh in-memory cache. The cache
 // pointer lets callers seed entries directly and assert post-conditions.
 // Mirrors the TS buildScene used across the cache / update / delete blocks.
-func buildCacheScene(t *testing.T) (*bookcache.InMemoryBookCacheGateway, *catalog.Facade) {
+func buildCacheScene(t *testing.T) (*bookcachememory.Cache, *catalog.Facade) {
 	t.Helper()
-	cache := bookcache.NewInMemoryBookCacheGateway()
+	cache := bookcachememory.NewCache()
 	facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:            sequentialIds("book"),
 		BookCacheGateway: cache,
@@ -946,7 +947,7 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 	})
 
 	t.Run("NewFacadeWithOverrides honours the BookCacheGateway override; default-built facade has empty cache", func(t *testing.T) {
-		overrideCache := bookcache.NewInMemoryBookCacheGateway()
+		overrideCache := bookcachememory.NewCache()
 		seeded := catalog.BookDto{
 			BookId:  "book-override",
 			Title:   "Override Hit",
@@ -1333,7 +1334,7 @@ func TestCatalogFacade_CacheGatewayFailures(t *testing.T) {
 
 	buildScene := func(t *testing.T) (*throwingOnceBookCacheGateway, *catalog.Facade) {
 		t.Helper()
-		inner := bookcache.NewInMemoryBookCacheGateway()
+		inner := bookcachememory.NewCache()
 		throwing := &throwingOnceBookCacheGateway{inner: inner}
 		facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 			BookCacheGateway: throwing,

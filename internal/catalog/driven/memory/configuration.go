@@ -9,6 +9,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
+	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
 )
 
@@ -47,7 +48,7 @@ func NewFacadeWithOverrides(o Overrides) *catalog.Facade {
 	}
 	cache := o.BookCacheGateway
 	if cache == nil {
-		cache = bookcache.NewInMemoryBookCacheGateway()
+		cache = bookcachememory.NewCache()
 	}
 	authz := o.AccessControl
 	if authz == nil {

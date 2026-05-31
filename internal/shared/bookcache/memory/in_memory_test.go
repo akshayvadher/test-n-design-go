@@ -6,11 +6,13 @@
 //
 // Slice 2's facade-level catalog spec drives the cache in anger via the
 // catalog.Facade. This file pins the bare contract the facade depends on.
-package bookcache
+package memory
 
 import (
 	"context"
 	"testing"
+
+	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 )
 
 // -----------------------------------------------------------------------------
@@ -18,9 +20,9 @@ import (
 // -----------------------------------------------------------------------------
 
 func TestInMemoryBookCacheGateway_GetAfterSet_ReturnsValue(t *testing.T) {
-	cache := NewInMemoryBookCacheGateway()
+	cache := NewCache()
 	ctx := context.Background()
-	want := BookDto{
+	want := bookcache.BookDto{
 		BookId:  "b-1",
 		Title:   "The Pragmatic Programmer",
 		Authors: []string{"Andrew Hunt", "David Thomas"},
@@ -51,7 +53,7 @@ func TestInMemoryBookCacheGateway_GetAfterSet_ReturnsValue(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestInMemoryBookCacheGateway_Get_UnsetKeyReturnsNilNil(t *testing.T) {
-	cache := NewInMemoryBookCacheGateway()
+	cache := NewCache()
 	ctx := context.Background()
 
 	got, err := cache.Get(ctx, "missing")
@@ -68,9 +70,9 @@ func TestInMemoryBookCacheGateway_Get_UnsetKeyReturnsNilNil(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestInMemoryBookCacheGateway_Evict_RemovesExistingEntry(t *testing.T) {
-	cache := NewInMemoryBookCacheGateway()
+	cache := NewCache()
 	ctx := context.Background()
-	if err := cache.Set(ctx, "isbn-1", BookDto{BookId: "b-1", Isbn: "isbn-1"}); err != nil {
+	if err := cache.Set(ctx, "isbn-1", bookcache.BookDto{BookId: "b-1", Isbn: "isbn-1"}); err != nil {
 		t.Fatalf("Set: got error %v, want nil", err)
 	}
 
@@ -92,7 +94,7 @@ func TestInMemoryBookCacheGateway_Evict_RemovesExistingEntry(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestInMemoryBookCacheGateway_Evict_MissingKeyIsNoOp(t *testing.T) {
-	cache := NewInMemoryBookCacheGateway()
+	cache := NewCache()
 	ctx := context.Background()
 
 	if err := cache.Evict(ctx, "never-set"); err != nil {
@@ -102,14 +104,14 @@ func TestInMemoryBookCacheGateway_Evict_MissingKeyIsNoOp(t *testing.T) {
 
 // -----------------------------------------------------------------------------
 // Get returns a defensive slice copy — the catalog facade reads the cached
-// BookDto and passes Authors through to HTTP response mapping; caller-side
+// bookcache.BookDto and passes Authors through to HTTP response mapping; caller-side
 // mutation of the returned slice must not corrupt the cache.
 // -----------------------------------------------------------------------------
 
 func TestInMemoryBookCacheGateway_Get_ReturnsDefensiveSliceCopy(t *testing.T) {
-	cache := NewInMemoryBookCacheGateway()
+	cache := NewCache()
 	ctx := context.Background()
-	if err := cache.Set(ctx, "isbn-1", BookDto{
+	if err := cache.Set(ctx, "isbn-1", bookcache.BookDto{
 		BookId:  "b-1",
 		Title:   "T",
 		Authors: []string{"Andrew Hunt", "David Thomas"},
