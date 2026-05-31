@@ -1,4 +1,4 @@
-package catalog
+package bun
 
 import (
 	"context"
@@ -6,57 +6,60 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/uptrace/bun"
+	upstreambun "github.com/uptrace/bun"
+
+	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 )
 
 // BookRow is the bun-mapped persistent shape of a book. JSON tags are
 // intentionally absent — this struct never crosses the HTTP boundary;
-// the HTTP DTOs in internal/catalog/http own that.
+// the HTTP DTOs in internal/catalog/driving/http own that.
 //
 // Column names match migrations/0001_catalog.sql verbatim. The `authors`
 // column is a Postgres TEXT[]; bun's `array` tag opts into pg array
 // (de)serialization via pgdriver's lib/pq-compatible encoder.
 type BookRow struct {
-	bun.BaseModel `bun:"table:books"`
+	upstreambun.BaseModel `bun:"table:books"`
 
-	BookId  BookId   `bun:"book_id,pk"`
-	Title   string   `bun:"title,notnull"`
-	Authors []string `bun:"authors,array,notnull"`
-	Isbn    Isbn     `bun:"isbn,notnull,unique"`
+	BookId  catalog.BookId `bun:"book_id,pk"`
+	Title   string         `bun:"title,notnull"`
+	Authors []string       `bun:"authors,array,notnull"`
+	Isbn    catalog.Isbn   `bun:"isbn,notnull,unique"`
 }
 
 // CopyRow is the bun-mapped persistent shape of a copy. Mirrors BookRow's
 // shape rules — column names match the migration, no JSON tags.
 type CopyRow struct {
-	bun.BaseModel `bun:"table:copies"`
+	upstreambun.BaseModel `bun:"table:copies"`
 
-	CopyId    CopyId        `bun:"copy_id,pk"`
-	BookId    BookId        `bun:"book_id,notnull"`
-	Condition CopyCondition `bun:"condition,notnull"`
-	Status    CopyStatus    `bun:"status,notnull"`
+	CopyId    catalog.CopyId        `bun:"copy_id,pk"`
+	BookId    catalog.BookId        `bun:"book_id,notnull"`
+	Condition catalog.CopyCondition `bun:"condition,notnull"`
+	Status    catalog.CopyStatus    `bun:"status,notnull"`
 }
 
-// BunRepository is the Postgres-backed Repository implementation. Every
-// method satisfies the same contract as InMemoryRepository: Find* returns
-// (nil, nil) on miss; non-nil errors signal infrastructure failure.
-type BunRepository struct {
-	db *bun.DB
+// Repository is the Postgres-backed catalog.Repository implementation.
+// Every method satisfies the same contract as the in-memory Repository:
+// Find* returns (nil, nil) on miss; non-nil errors signal infrastructure
+// failure.
+type Repository struct {
+	db *upstreambun.DB
 }
 
-// Compile-time assertion that BunRepository satisfies Repository. If a
-// method signature drifts, the assertion fails before any test runs.
-var _ Repository = (*BunRepository)(nil)
+// Compile-time assertion that *Repository satisfies the catalog driven
+// port.
+var _ catalog.Repository = (*Repository)(nil)
 
-// NewBunRepository constructs a BunRepository bound to db. The caller owns
-// the *bun.DB lifecycle (open + close); BunRepository does not close it.
-func NewBunRepository(db *bun.DB) *BunRepository {
-	return &BunRepository{db: db}
+// NewRepository constructs a *Repository bound to db. The caller owns
+// the *bun.DB lifecycle (open + close); Repository does not close it.
+func NewRepository(db *upstreambun.DB) *Repository {
+	return &Repository{db: db}
 }
 
 // SaveBook upserts the book by its primary key. Matches the TS source's
 // `onConflictDoUpdate` semantics: a save against an existing book_id
 // overwrites title/authors/isbn in place.
-func (r *BunRepository) SaveBook(ctx context.Context, book BookDto) error {
+func (r *Repository) SaveBook(ctx context.Context, book catalog.BookDto) error {
 	row := toBookRow(book)
 	_, err := r.db.NewInsert().
 		Model(&row).
@@ -72,7 +75,7 @@ func (r *BunRepository) SaveBook(ctx context.Context, book BookDto) error {
 }
 
 // FindBookById returns the book row by primary key, or (nil, nil) on miss.
-func (r *BunRepository) FindBookById(ctx context.Context, bookId BookId) (*BookDto, error) {
+func (r *Repository) FindBookById(ctx context.Context, bookId catalog.BookId) (*catalog.BookDto, error) {
 	var row BookRow
 	err := r.db.NewSelect().Model(&row).Where("book_id = ?", bookId).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -86,7 +89,7 @@ func (r *BunRepository) FindBookById(ctx context.Context, bookId BookId) (*BookD
 }
 
 // FindBookByIsbn returns the book row by isbn, or (nil, nil) on miss.
-func (r *BunRepository) FindBookByIsbn(ctx context.Context, isbn Isbn) (*BookDto, error) {
+func (r *Repository) FindBookByIsbn(ctx context.Context, isbn catalog.Isbn) (*catalog.BookDto, error) {
 	var row BookRow
 	err := r.db.NewSelect().Model(&row).Where("isbn = ?", isbn).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -102,7 +105,7 @@ func (r *BunRepository) FindBookByIsbn(ctx context.Context, isbn Isbn) (*BookDto
 // ListBooks returns every book ordered by book_id ASC. UUIDs are not
 // insertion-monotonic, but the order is deterministic — which is the
 // only contract the facade depends on.
-func (r *BunRepository) ListBooks(ctx context.Context) ([]BookDto, error) {
+func (r *Repository) ListBooks(ctx context.Context) ([]catalog.BookDto, error) {
 	var rows []BookRow
 	err := r.db.NewSelect().Model(&rows).OrderExpr("book_id ASC").Scan(ctx)
 	if err != nil {
@@ -114,14 +117,14 @@ func (r *BunRepository) ListBooks(ctx context.Context) ([]BookDto, error) {
 // ListBooksByIds returns one row per matching book in book_id order. An
 // empty input short-circuits with a non-nil empty slice — the database
 // is not consulted.
-func (r *BunRepository) ListBooksByIds(ctx context.Context, bookIds []BookId) ([]BookDto, error) {
+func (r *Repository) ListBooksByIds(ctx context.Context, bookIds []catalog.BookId) ([]catalog.BookDto, error) {
 	if len(bookIds) == 0 {
-		return []BookDto{}, nil
+		return []catalog.BookDto{}, nil
 	}
 	var rows []BookRow
 	err := r.db.NewSelect().
 		Model(&rows).
-		Where("book_id IN (?)", bun.In(bookIds)).
+		Where("book_id IN (?)", upstreambun.In(bookIds)).
 		OrderExpr("book_id ASC").
 		Scan(ctx)
 	if err != nil {
@@ -134,7 +137,7 @@ func (r *BunRepository) ListBooksByIds(ctx context.Context, bookIds []BookId) ([
 // outstanding copies fails at the FK constraint — matches the TS source's
 // no-cascade behaviour. The facade pre-checks existence and raises
 // BookNotFoundError before reaching this method.
-func (r *BunRepository) DeleteBook(ctx context.Context, bookId BookId) error {
+func (r *Repository) DeleteBook(ctx context.Context, bookId catalog.BookId) error {
 	_, err := r.db.NewDelete().
 		Model((*BookRow)(nil)).
 		Where("book_id = ?", bookId).
@@ -149,7 +152,7 @@ func (r *BunRepository) DeleteBook(ctx context.Context, bookId BookId) error {
 // on-conflict-do-update shape so toggling a copy's status (Slice 2's
 // MarkCopyAvailable / MarkCopyUnavailable flow) becomes one INSERT, not a
 // load-then-UPDATE round trip.
-func (r *BunRepository) SaveCopy(ctx context.Context, copy CopyDto) error {
+func (r *Repository) SaveCopy(ctx context.Context, copy catalog.CopyDto) error {
 	row := toCopyRow(copy)
 	_, err := r.db.NewInsert().
 		Model(&row).
@@ -165,7 +168,7 @@ func (r *BunRepository) SaveCopy(ctx context.Context, copy CopyDto) error {
 }
 
 // FindCopyById returns the copy row by primary key, or (nil, nil) on miss.
-func (r *BunRepository) FindCopyById(ctx context.Context, copyId CopyId) (*CopyDto, error) {
+func (r *Repository) FindCopyById(ctx context.Context, copyId catalog.CopyId) (*catalog.CopyDto, error) {
 	var row CopyRow
 	err := r.db.NewSelect().Model(&row).Where("copy_id = ?", copyId).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -181,7 +184,7 @@ func (r *BunRepository) FindCopyById(ctx context.Context, copyId CopyId) (*CopyD
 // toBookRow converts a domain BookDto into the bun row. Authors is
 // defensively copied so internal state and caller state do not share the
 // backing array.
-func toBookRow(book BookDto) BookRow {
+func toBookRow(book catalog.BookDto) BookRow {
 	return BookRow{
 		BookId:  book.BookId,
 		Title:   book.Title,
@@ -192,8 +195,8 @@ func toBookRow(book BookDto) BookRow {
 
 // toBookDto converts a bun row back into a domain BookDto. Authors is
 // defensively copied for the same reason as toBookRow.
-func toBookDto(row BookRow) BookDto {
-	return BookDto{
+func toBookDto(row BookRow) catalog.BookDto {
+	return catalog.BookDto{
 		BookId:  row.BookId,
 		Title:   row.Title,
 		Authors: append([]string(nil), row.Authors...),
@@ -203,8 +206,8 @@ func toBookDto(row BookRow) BookDto {
 
 // toBookDtos converts a slice of bun rows into a fresh slice of domain
 // BookDtos, preserving order.
-func toBookDtos(rows []BookRow) []BookDto {
-	books := make([]BookDto, 0, len(rows))
+func toBookDtos(rows []BookRow) []catalog.BookDto {
+	books := make([]catalog.BookDto, 0, len(rows))
 	for _, row := range rows {
 		books = append(books, toBookDto(row))
 	}
@@ -212,7 +215,7 @@ func toBookDtos(rows []BookRow) []BookDto {
 }
 
 // toCopyRow converts a domain CopyDto into the bun row.
-func toCopyRow(copy CopyDto) CopyRow {
+func toCopyRow(copy catalog.CopyDto) CopyRow {
 	return CopyRow{
 		CopyId:    copy.CopyId,
 		BookId:    copy.BookId,
@@ -222,8 +225,8 @@ func toCopyRow(copy CopyDto) CopyRow {
 }
 
 // toCopyDto converts a bun row back into a domain CopyDto.
-func toCopyDto(row CopyRow) CopyDto {
-	return CopyDto{
+func toCopyDto(row CopyRow) catalog.CopyDto {
+	return catalog.CopyDto{
 		CopyId:    row.CopyId,
 		BookId:    row.BookId,
 		Condition: row.Condition,

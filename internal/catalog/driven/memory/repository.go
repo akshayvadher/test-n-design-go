@@ -1,11 +1,13 @@
-package catalog
+package memory
 
 import (
 	"context"
 	"sync"
+
+	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 )
 
-// InMemoryRepository is the in-memory Repository implementation. It is
+// Repository is the in-memory catalog.Repository implementation. It is
 // safe for concurrent use. Books are stored alongside the insertion order
 // in which SaveBook first observed them so ListBooks returns them in that
 // order — matching the source TS in-memory repository (`Map<K, V>` in JS
@@ -14,25 +16,29 @@ import (
 // A SaveBook against an existing BookId updates the stored value in place
 // and does NOT change the book's position in the order slice — the source
 // TS behaviour for `Map.set` on an existing key.
-type InMemoryRepository struct {
+type Repository struct {
 	mu         sync.RWMutex
-	booksById  map[BookId]BookDto
-	bookOrder  []BookId
-	copiesById map[CopyId]CopyDto
+	booksById  map[catalog.BookId]catalog.BookDto
+	bookOrder  []catalog.BookId
+	copiesById map[catalog.CopyId]catalog.CopyDto
 }
 
-// NewInMemoryRepository constructs an empty InMemoryRepository.
-func NewInMemoryRepository() *InMemoryRepository {
-	return &InMemoryRepository{
-		booksById:  map[BookId]BookDto{},
-		bookOrder:  []BookId{},
-		copiesById: map[CopyId]CopyDto{},
+// Compile-time assertion that *Repository satisfies the catalog driven
+// port.
+var _ catalog.Repository = (*Repository)(nil)
+
+// NewRepository constructs an empty in-memory Repository.
+func NewRepository() *Repository {
+	return &Repository{
+		booksById:  map[catalog.BookId]catalog.BookDto{},
+		bookOrder:  []catalog.BookId{},
+		copiesById: map[catalog.CopyId]catalog.CopyDto{},
 	}
 }
 
 // SaveBook upserts the book. New books are appended to the order slice;
 // existing books retain their original position.
-func (r *InMemoryRepository) SaveBook(_ context.Context, book BookDto) error {
+func (r *Repository) SaveBook(_ context.Context, book catalog.BookDto) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, existed := r.booksById[book.BookId]; !existed {
@@ -43,7 +49,7 @@ func (r *InMemoryRepository) SaveBook(_ context.Context, book BookDto) error {
 }
 
 // FindBookById returns a copy of the stored book, or (nil, nil) on miss.
-func (r *InMemoryRepository) FindBookById(_ context.Context, bookId BookId) (*BookDto, error) {
+func (r *Repository) FindBookById(_ context.Context, bookId catalog.BookId) (*catalog.BookDto, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	book, ok := r.booksById[bookId]
@@ -56,7 +62,7 @@ func (r *InMemoryRepository) FindBookById(_ context.Context, bookId BookId) (*Bo
 
 // FindBookByIsbn scans the books in insertion order for a matching ISBN.
 // Returns (nil, nil) on miss.
-func (r *InMemoryRepository) FindBookByIsbn(_ context.Context, isbn Isbn) (*BookDto, error) {
+func (r *Repository) FindBookByIsbn(_ context.Context, isbn catalog.Isbn) (*catalog.BookDto, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, id := range r.bookOrder {
@@ -72,10 +78,10 @@ func (r *InMemoryRepository) FindBookByIsbn(_ context.Context, isbn Isbn) (*Book
 // ListBooks returns every stored book in insertion order. The returned
 // slice is freshly allocated; callers can mutate it without affecting the
 // repository.
-func (r *InMemoryRepository) ListBooks(_ context.Context) ([]BookDto, error) {
+func (r *Repository) ListBooks(_ context.Context) ([]catalog.BookDto, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	books := make([]BookDto, 0, len(r.bookOrder))
+	books := make([]catalog.BookDto, 0, len(r.bookOrder))
 	for _, id := range r.bookOrder {
 		books = append(books, cloneBookDto(r.booksById[id]))
 	}
@@ -86,14 +92,14 @@ func (r *InMemoryRepository) ListBooks(_ context.Context) ([]BookDto, error) {
 // Duplicate ids in the input slice produce a single output row each.
 // Unknown ids are silently dropped. An empty input returns an empty
 // (non-nil) slice.
-func (r *InMemoryRepository) ListBooksByIds(_ context.Context, bookIds []BookId) ([]BookDto, error) {
+func (r *Repository) ListBooksByIds(_ context.Context, bookIds []catalog.BookId) ([]catalog.BookDto, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	wanted := make(map[BookId]struct{}, len(bookIds))
+	wanted := make(map[catalog.BookId]struct{}, len(bookIds))
 	for _, id := range bookIds {
 		wanted[id] = struct{}{}
 	}
-	books := make([]BookDto, 0, len(wanted))
+	books := make([]catalog.BookDto, 0, len(wanted))
 	for _, id := range r.bookOrder {
 		if _, ok := wanted[id]; ok {
 			books = append(books, cloneBookDto(r.booksById[id]))
@@ -105,7 +111,7 @@ func (r *InMemoryRepository) ListBooksByIds(_ context.Context, bookIds []BookId)
 // DeleteBook removes the book and its slot in the order slice. Deleting a
 // missing book is a no-op — the facade pre-checks existence and raises
 // BookNotFoundError before reaching this method.
-func (r *InMemoryRepository) DeleteBook(_ context.Context, bookId BookId) error {
+func (r *Repository) DeleteBook(_ context.Context, bookId catalog.BookId) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.booksById[bookId]; !ok {
@@ -117,7 +123,7 @@ func (r *InMemoryRepository) DeleteBook(_ context.Context, bookId BookId) error 
 }
 
 // SaveCopy upserts the copy.
-func (r *InMemoryRepository) SaveCopy(_ context.Context, copy CopyDto) error {
+func (r *Repository) SaveCopy(_ context.Context, copy catalog.CopyDto) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.copiesById[copy.CopyId] = copy
@@ -125,7 +131,7 @@ func (r *InMemoryRepository) SaveCopy(_ context.Context, copy CopyDto) error {
 }
 
 // FindCopyById returns the stored copy by value, or (nil, nil) on miss.
-func (r *InMemoryRepository) FindCopyById(_ context.Context, copyId CopyId) (*CopyDto, error) {
+func (r *Repository) FindCopyById(_ context.Context, copyId catalog.CopyId) (*catalog.CopyDto, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	copy, ok := r.copiesById[copyId]
@@ -137,7 +143,7 @@ func (r *InMemoryRepository) FindCopyById(_ context.Context, copyId CopyId) (*Co
 
 // cloneBookDto returns a defensive copy of book so internal state and
 // returned values do not share the Authors slice backing array.
-func cloneBookDto(book BookDto) BookDto {
+func cloneBookDto(book catalog.BookDto) catalog.BookDto {
 	clone := book
 	if book.Authors != nil {
 		clone.Authors = make([]string, len(book.Authors))
@@ -147,7 +153,7 @@ func cloneBookDto(book BookDto) BookDto {
 }
 
 // removeBookId returns a new slice with the first occurrence of id removed.
-func removeBookId(order []BookId, id BookId) []BookId {
+func removeBookId(order []catalog.BookId, id catalog.BookId) []catalog.BookId {
 	for index, candidate := range order {
 		if candidate == id {
 			return append(order[:index], order[index+1:]...)

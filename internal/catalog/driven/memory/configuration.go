@@ -1,4 +1,4 @@
-package catalog
+package memory
 
 import (
 	"io"
@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
+	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
 )
@@ -17,7 +18,7 @@ import (
 // NewID for deterministic ids and IsbnLookupGateway when exercising
 // enrichment).
 type Overrides struct {
-	Repository        Repository
+	Repository        catalog.Repository
 	NewID             func() string
 	IsbnLookupGateway isbngateway.IsbnLookupGateway
 	BookCacheGateway  bookcache.BookCacheGateway
@@ -25,16 +26,16 @@ type Overrides struct {
 	Logger            *slog.Logger
 }
 
-// NewFacadeWithOverrides constructs a Facade applying the supplied
-// Overrides on top of the in-memory defaults. The defaults wire a fresh
-// in-memory repository, a UUID-string id generator, fresh in-memory ISBN
-// and book-cache gateways, a default accesscontrol Facade, and a
-// silent slog logger. Tests reuse this constructor so each test gets a
-// clean substrate without restating the wiring.
-func NewFacadeWithOverrides(o Overrides) *Facade {
+// NewFacadeWithOverrides constructs a catalog.Facade applying the
+// supplied Overrides on top of the in-memory defaults. The defaults
+// wire a fresh in-memory Repository, a UUID-string id generator, fresh
+// in-memory ISBN and book-cache gateways, a default accesscontrol
+// Facade, and a silent slog logger. Tests reuse this constructor so each
+// test gets a clean substrate without restating the wiring.
+func NewFacadeWithOverrides(o Overrides) *catalog.Facade {
 	repository := o.Repository
 	if repository == nil {
-		repository = NewInMemoryRepository()
+		repository = NewRepository()
 	}
 	newID := o.NewID
 	if newID == nil {
@@ -56,5 +57,5 @@ func NewFacadeWithOverrides(o Overrides) *Facade {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return NewFacade(repository, newID, gateway, cache, authz, logger)
+	return catalog.NewFacade(repository, newID, gateway, cache, authz, logger)
 }

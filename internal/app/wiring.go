@@ -29,7 +29,8 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
-	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
+	catalogbun "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/bun"
+	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/categories"
 	categoriesbun "github.com/akshayvadher/test-n-design-go/internal/categories/driven/bun"
 	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/driving/http"
@@ -48,6 +49,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
+	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
 )
 
 // Deps carries the inputs Wire needs from the caller. The caller (main or
@@ -181,11 +183,14 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	router := buildRouter(deps.Logger, registry)
 	router.Get("/healthz", healthzHandler)
 
-	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{
-		Repository:       catalog.NewBunRepository(bunDB),
-		BookCacheGateway: cache,
-		Logger:           deps.Logger,
-	})
+	catalogFacade := catalog.NewFacade(
+		catalogbun.NewRepository(bunDB),
+		uuid.NewString,
+		isbngateway.NewInMemoryIsbnLookupGateway(),
+		cache,
+		accesscontrol.NewFacade(),
+		deps.Logger,
+	)
 	cataloghttp.Wire(router, cataloghttp.Deps{Facade: catalogFacade, Logger: deps.Logger})
 
 	membershipFacade := membership.NewFacade(

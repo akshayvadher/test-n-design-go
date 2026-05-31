@@ -29,6 +29,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 )
 
@@ -61,7 +62,7 @@ func silentLogger() *slog.Logger {
 func buildRouter(t *testing.T) (chi.Router, *catalog.Facade) {
 	t.Helper()
 	logger := silentLogger()
-	facade := catalog.NewFacadeWithOverrides(catalog.Overrides{
+	facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:  sequentialIds("id"),
 		Logger: logger,
 	})

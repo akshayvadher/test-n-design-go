@@ -25,6 +25,7 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
@@ -68,7 +69,7 @@ func buildScene(t *testing.T) *testScene {
 	t.Helper()
 	logger := silentLogger()
 
-	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{
+	catalogFacade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:  sequentialIds("cat"),
 		Logger: logger,
 	})
