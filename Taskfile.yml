@@ -141,3 +141,46 @@ tasks:
     cmds:
       - go mod tidy
       - go mod verify
+
+  tools:install:
+    desc: Install everything a dev needs (go, podman, atlas). Idempotent per tool.
+    cmds:
+      - task: tools:go
+      - task: tools:podman
+      - task: tools:atlas
+
+  tools:go:
+    desc: Install the Go toolchain.
+    cmds:
+      - cmd: winget install --id GoLang.Go --silent --accept-source-agreements --accept-package-agreements
+        platforms: [windows]
+      - cmd: brew install go
+        platforms: [darwin]
+      - cmd: |
+          if command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y golang-go;
+          elif command -v dnf     >/dev/null 2>&1; then sudo dnf install -y golang;
+          elif command -v pacman  >/dev/null 2>&1; then sudo pacman -S --noconfirm go;
+          else echo "no apt/dnf/pacman found — install Go from https://go.dev/dl/" >&2 && exit 1; fi
+        platforms: [linux]
+
+  tools:podman:
+    desc: Install podman (the container engine).
+    cmds:
+      - cmd: winget install --id RedHat.Podman --silent --accept-source-agreements --accept-package-agreements
+        platforms: [windows]
+      - cmd: brew install podman
+        platforms: [darwin]
+      - cmd: |
+          if command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y podman podman-compose;
+          elif command -v dnf     >/dev/null 2>&1; then sudo dnf install -y podman podman-compose;
+          elif command -v pacman  >/dev/null 2>&1; then sudo pacman -S --noconfirm podman podman-compose;
+          else echo "no apt/dnf/pacman found — install podman from https://podman.io/docs/installation" >&2 && exit 1; fi
+        platforms: [linux]
+
+  tools:atlas:
+    desc: Install the atlas CLI for database migrations.
+    cmds:
+      - cmd: scoop install atlas
+        platforms: [windows]
+      - cmd: curl -sSf https://atlasgo.sh | sh
+        platforms: [linux, darwin]

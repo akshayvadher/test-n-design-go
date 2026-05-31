@@ -1,12 +1,39 @@
 # test-n-design-go
 
-A Go port of Jakub Nabrdalik's [improving-tdd-demo](https://github.com/jakubn/improving-test) — a modular-monolith library service that demonstrates the architectural patterns underneath sustainable TDD: bounded contexts behind facades, one transaction per module, domain events as the only cross-module write path, and in-memory test doubles in place of mocks.
+A Go port of Akshay Vadher's [improving-tdd](https://github.com/akshayvadher/improving-tdd) — a modular-monolith library service that demonstrates the architectural patterns underneath sustainable TDD: bounded contexts behind facades, one transaction per module, domain events as the only cross-module write path, and in-memory test doubles in place of mocks.
 
 This is a teaching repository. Every design decision is deliberate, every shortcut is documented, and every architectural rule is enforced through file layout rather than tooling.
 
 ## Quick start
 
 The service ships as a single binary backed by Postgres and Redis. Both run locally via `podman compose`; no docker required.
+
+### One-time setup
+
+Install [Task](https://taskfile.dev/installation/) (the only prerequisite — every other tool is installed by Task itself):
+
+| OS      | Command |
+| ---     | --- |
+| Windows | `winget install Task.Task` |
+| macOS   | `brew install go-task` |
+| Linux   | `sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d` |
+
+Then bootstrap the rest:
+
+```sh
+task tools:install     # installs go, podman, atlas
+```
+
+On Windows + macOS, initialise the podman VM once:
+
+```sh
+podman machine init
+podman machine start
+```
+
+`task tools:install` is idempotent — re-running it just verifies each tool is present. Sub-tasks exist if you want to install one tool at a time: `task tools:go`, `task tools:podman`, `task tools:atlas`.
+
+### Daily loop
 
 ```sh
 task up                # start postgres + redis, wait until healthy
