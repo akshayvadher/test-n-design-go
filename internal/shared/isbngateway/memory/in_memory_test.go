@@ -7,11 +7,13 @@
 // Slice 2's facade-level catalog spec will drive the gateway in anger via
 // the catalog.Facade. This file pins the bare contract the catalog facade
 // will assume.
-package isbngateway
+package memory
 
 import (
 	"context"
 	"testing"
+
+	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
 )
 
 // -----------------------------------------------------------------------------
@@ -19,9 +21,9 @@ import (
 // -----------------------------------------------------------------------------
 
 func TestInMemoryIsbnLookupGateway_Lookup_SeededIsbnReturnsMetadata(t *testing.T) {
-	gateway := NewInMemoryIsbnLookupGateway()
+	gateway := NewGateway()
 	ctx := context.Background()
-	want := BookMetadata{
+	want := isbngateway.BookMetadata{
 		Title:   "The Pragmatic Programmer",
 		Authors: []string{"Andrew Hunt", "David Thomas"},
 	}
@@ -48,7 +50,7 @@ func TestInMemoryIsbnLookupGateway_Lookup_SeededIsbnReturnsMetadata(t *testing.T
 // -----------------------------------------------------------------------------
 
 func TestInMemoryIsbnLookupGateway_Lookup_UnknownIsbnReturnsNilNil(t *testing.T) {
-	gateway := NewInMemoryIsbnLookupGateway()
+	gateway := NewGateway()
 	ctx := context.Background()
 
 	got, err := gateway.FindByIsbn(ctx, "not-seeded")
@@ -66,9 +68,9 @@ func TestInMemoryIsbnLookupGateway_Lookup_UnknownIsbnReturnsNilNil(t *testing.T)
 // -----------------------------------------------------------------------------
 
 func TestInMemoryIsbnLookupGateway_FindByIsbn_ReturnsDefensiveSliceCopy(t *testing.T) {
-	gateway := NewInMemoryIsbnLookupGateway()
+	gateway := NewGateway()
 	ctx := context.Background()
-	gateway.Seed("isbn-1", BookMetadata{
+	gateway.Seed("isbn-1", isbngateway.BookMetadata{
 		Title:   "T",
 		Authors: []string{"Andrew Hunt", "David Thomas"},
 	})

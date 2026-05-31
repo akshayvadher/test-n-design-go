@@ -28,6 +28,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
+	isbngatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -80,9 +81,9 @@ func buildFacade(t *testing.T) *catalog.Facade {
 // buildFacadeWithGateway constructs a catalog.Facade wired to a seeded in-memory
 // IsbnLookupGateway. Mirrors the TS buildFacadeWithGateway. The returned
 // gateway pointer lets callers seed further entries inside a test.
-func buildFacadeWithGateway(t *testing.T, seed map[string]isbngateway.BookMetadata) (*catalog.Facade, *isbngateway.InMemoryIsbnLookupGateway) {
+func buildFacadeWithGateway(t *testing.T, seed map[string]isbngateway.BookMetadata) (*catalog.Facade, *isbngatewaymemory.Gateway) {
 	t.Helper()
-	gateway := isbngateway.NewInMemoryIsbnLookupGateway()
+	gateway := isbngatewaymemory.NewGateway()
 	for isbn, metadata := range seed {
 		gateway.Seed(isbn, metadata)
 	}
@@ -741,7 +742,7 @@ func TestCatalogFacade_AddBook_GatewayFailures(t *testing.T) {
 
 	buildWrappedScene := func(t *testing.T, seed map[string]isbngateway.BookMetadata) (*catalog.Facade, *throwingOnceIsbnLookupGateway) {
 		t.Helper()
-		inner := isbngateway.NewInMemoryIsbnLookupGateway()
+		inner := isbngatewaymemory.NewGateway()
 		for isbn, metadata := range seed {
 			inner.Seed(isbn, metadata)
 		}

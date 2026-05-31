@@ -53,7 +53,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
-	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
+	isbngatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway/memory"
 )
 
 // Deps carries the inputs Wire needs from the caller. The caller (main or
@@ -190,7 +190,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	catalogFacade := catalog.NewFacade(
 		catalogbun.NewRepository(bunDB),
 		uuid.NewString,
-		isbngateway.NewInMemoryIsbnLookupGateway(),
+		isbngatewaymemory.NewGateway(),
 		cache,
 		accesscontrol.NewFacade(),
 		deps.Logger,

@@ -11,6 +11,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
 	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
+	isbngatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway/memory"
 )
 
 // Overrides is the test-substitution extension point for the catalog
@@ -44,7 +45,7 @@ func NewFacadeWithOverrides(o Overrides) *catalog.Facade {
 	}
 	gateway := o.IsbnLookupGateway
 	if gateway == nil {
-		gateway = isbngateway.NewInMemoryIsbnLookupGateway()
+		gateway = isbngatewaymemory.NewGateway()
 	}
 	cache := o.BookCacheGateway
 	if cache == nil {
