@@ -184,3 +184,16 @@ tasks:
         platforms: [windows]
       - cmd: curl -sSf https://atlasgo.sh | sh
         platforms: [linux, darwin]
+
+  image:build:
+    desc: Build the production OCI image via podman (multi-stage, distroless).
+    cmds:
+      - podman build -t test-n-design-go:latest .
+
+  image:run:
+    desc: Run the built image against the local podman-compose postgres + redis.
+    cmds:
+      - podman run --rm -p 3000:3000
+          -e LIBRARY_DATABASE_URL='postgres://library:library@host.containers.internal:5432/library?sslmode=disable'
+          -e LIBRARY_REDIS_URL='redis://host.containers.internal:6379/0'
+          test-n-design-go:latest

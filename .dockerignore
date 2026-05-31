@@ -1,0 +1,42 @@
+# Build artefacts
+bin/
+dist/
+*.test
+coverage.out
+
+# Editor + IDE state
+.idea/
+.vscode/
+tmp/
+
+# Local environment (never bake secrets into the image)
+.env
+.env.local
+
+# Claude / bee workflow state (local-only)
+.claude/
+
+# Git metadata — not needed inside the image
+.git/
+.gitignore
+
+# Documentation and specs — not needed inside the runtime image
+docs/
+*.md
+.http/
+
+# Test infrastructure not consumed by `go build ./cmd/library`
+test/
+
+# Local task scripts — image runs the binary directly, not via task
+Taskfile.yml
+scripts/
+
+# Compose + migrations are deployment artefacts, not runtime
+compose.yaml
+migrations/
+atlas.hcl
+
+# The Dockerfile itself
+Dockerfile
+.dockerignore
