@@ -20,7 +20,7 @@
 //     effects
 //   - StageEvent without any Stage still publishes
 //   - Stage without any StageEvent still commits
-package tx
+package memory
 
 import (
 	"bytes"
@@ -133,7 +133,7 @@ func TestInMemory_HappyPath_StageAndEventCommitAndPublish(t *testing.T) {
 	ctx := context.Background()
 
 	cell := 0
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.Stage(func(_ context.Context) error { cell++; return nil })
 	txc.StageEvent(testEvent{name: "TestEvent"})
 
@@ -158,7 +158,7 @@ func TestInMemory_WorkError_DiscardsStagesAndEvents(t *testing.T) {
 	ctx := context.Background()
 
 	cell := 0
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.Stage(func(_ context.Context) error { cell++; return nil })
 	txc.StageEvent(testEvent{name: "TestEvent"})
 
@@ -184,7 +184,7 @@ func TestInMemory_StageOrderPreservedAtCommit(t *testing.T) {
 	ctx := context.Background()
 
 	var order []int
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.Stage(func(_ context.Context) error { order = append(order, 1); return nil })
 	txc.Stage(func(_ context.Context) error { order = append(order, 2); return nil })
 	txc.Stage(func(_ context.Context) error { order = append(order, 3); return nil })
@@ -203,7 +203,7 @@ func TestInMemory_StageEventOrderPreserved(t *testing.T) {
 	captured := captureEvents(t, bus, "E1", "E2", "E3")
 	ctx := context.Background()
 
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.StageEvent(testEvent{name: "E1"})
 	txc.StageEvent(testEvent{name: "E2"})
 	txc.StageEvent(testEvent{name: "E3"})
@@ -229,7 +229,7 @@ func TestInMemory_WritesHappenBeforeEvents(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.Stage(func(_ context.Context) error { journal = append(journal, "write"); return nil })
 	txc.StageEvent(testEvent{name: "TestEvent"})
 
@@ -249,7 +249,7 @@ func TestInMemory_StageClosureError_AbortsCommit(t *testing.T) {
 
 	stageErr := errors.New("stage closure failed")
 	var laterRan bool
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.Stage(func(_ context.Context) error { return stageErr })
 	txc.Stage(func(_ context.Context) error { laterRan = true; return nil })
 	txc.StageEvent(testEvent{name: "TestEvent"})
@@ -280,7 +280,7 @@ func TestInMemory_BusPublishFailure_DoesNotRollback(t *testing.T) {
 	ctx := context.Background()
 
 	cell := 0
-	txc := NewInMemoryTransactionalContext(bus, logger)
+	txc := NewTransactionalContext(bus, logger)
 	txc.Stage(func(_ context.Context) error { cell++; return nil })
 	txc.StageEvent(testEvent{name: "Flaky"})
 	txc.StageEvent(testEvent{name: "Ok"})
@@ -334,7 +334,7 @@ func TestInMemory_MultipleEventTypes_AllPublish(t *testing.T) {
 	captured := captureEvents(t, bus, "A", "B", "C")
 	ctx := context.Background()
 
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.StageEvent(testEvent{name: "A"})
 	txc.StageEvent(testEvent{name: "B"})
 	txc.StageEvent(testEvent{name: "C"})
@@ -352,7 +352,7 @@ func TestInMemory_EmptyRun_NoSideEffects(t *testing.T) {
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	if err := txc.Run(ctx, func(_ context.Context) error { return nil }); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestInMemory_StageEventOnly_StillPublishes(t *testing.T) {
 	captured := captureEvents(t, bus, "TestEvent")
 	ctx := context.Background()
 
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.StageEvent(testEvent{name: "TestEvent"})
 	if err := txc.Run(ctx, func(_ context.Context) error { return nil }); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -382,7 +382,7 @@ func TestInMemory_StageOnly_StillCommits(t *testing.T) {
 	ctx := context.Background()
 
 	cell := 0
-	txc := NewInMemoryTransactionalContext(bus, silentLogger())
+	txc := NewTransactionalContext(bus, silentLogger())
 	txc.Stage(func(_ context.Context) error { cell++; return nil })
 	if err := txc.Run(ctx, func(_ context.Context) error { return nil }); err != nil {
 		t.Fatalf("Run returned error: %v", err)

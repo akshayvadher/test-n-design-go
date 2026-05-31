@@ -35,6 +35,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
+	txmemory "github.com/akshayvadher/test-n-design-go/internal/shared/tx/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -896,7 +897,7 @@ func TestLendingFacade_ReturnLoan_BusFailureIsLoggedNotSurfaced(t *testing.T) {
 	// failure for lending.LoanReturned after Borrow completes — so Borrow's staged
 	// lending.LoanOpened still publishes normally.
 	txFactory := func() tx.TransactionalContext {
-		return tx.NewInMemoryTransactionalContext(flaky, logger)
+		return txmemory.NewTransactionalContext(flaky, logger)
 	}
 	s := buildSceneWith(t, lendingmemory.Overrides{Bus: flaky, TxFactory: txFactory, Logger: logger})
 	_, copyDto := seedAvailableCopy(t, s, 1)

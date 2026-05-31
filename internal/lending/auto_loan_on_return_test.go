@@ -34,6 +34,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
+	txmemory "github.com/akshayvadher/test-n-design-go/internal/shared/tx/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -102,7 +103,7 @@ func buildConsumerScene(t *testing.T, opts consumerSceneOpts) *consumerScene {
 
 	bus := eventsmemory.NewBus(logger)
 	txFactory := func() tx.TransactionalContext {
-		return tx.NewInMemoryTransactionalContext(bus, logger)
+		return txmemory.NewTransactionalContext(bus, logger)
 	}
 
 	facade := lendingmemory.NewFacadeWithOverrides(lendingmemory.Overrides{

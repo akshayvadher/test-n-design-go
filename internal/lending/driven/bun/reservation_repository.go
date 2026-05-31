@@ -31,7 +31,7 @@ type ReservationRow struct {
 // ReservationRepository is the Postgres-backed
 // lending.ReservationRepository implementation. SaveReservation stages the
 // write inside the supplied TransactionalContext so the INSERT runs
-// against the live tx handle resolved via tx.TxFromContext. Reads bypass
+// against the live tx handle resolved via txbun.TxFromContext. Reads bypass
 // the tx substrate.
 type ReservationRepository struct {
 	db *upstreambun.DB

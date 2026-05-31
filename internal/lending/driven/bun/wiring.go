@@ -13,6 +13,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
+	txbun "github.com/akshayvadher/test-n-design-go/internal/shared/tx/bun"
 )
 
 // Wiring bundles the production-grade lending Facade together with the
@@ -53,7 +54,7 @@ func WireFacade(
 	// calls reach. Per BunTransactionalContext's contract, callers
 	// construct a fresh context per business operation.
 	txFactory := func() tx.TransactionalContext {
-		return tx.NewBunTransactionalContext(db, bus, logger)
+		return txbun.NewTransactionalContext(db, bus, logger)
 	}
 	facade := lending.NewFacade(
 		catalogFacade,

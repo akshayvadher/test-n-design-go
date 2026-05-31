@@ -21,9 +21,9 @@
 //     still publishes.
 //   - Repository-style usage: an inline widgetRepository resolves the live
 //     tx handle via TxFromContext when inside Run, and falls back to the
-//     base *bun.DB when called outside any Run — both paths persist rows.
+//     base *upstreambun.DB when called outside any Run — both paths persist rows.
 //   - The TxFromContext fallback path: a direct insert outside Run succeeds.
-package tx
+package bun
 
 import (
 	"bytes"
@@ -34,7 +34,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uptrace/bun"
+	upstreambun "github.com/uptrace/bun"
 
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
@@ -56,7 +56,7 @@ import (
 // private (test-file-scoped) is required for the integration build tag —
 // nothing outside this file should reference it.
 type widget struct {
-	bun.BaseModel `bun:"table:tx_test_widgets,alias:w"`
+	upstreambun.BaseModel `bun:"table:tx_test_widgets,alias:w"`
 
 	ID    string `bun:"id,pk"`
 	Value int    `bun:"value,notnull"`
@@ -71,10 +71,10 @@ const dropWidgetsSQL = `DROP TABLE IF EXISTS tx_test_widgets`
 
 const truncateWidgetsSQL = `TRUNCATE TABLE tx_test_widgets`
 
-// setupBunTx boots a postgres testcontainer, wires a *bun.DB through the
+// setupBunTx boots a postgres testcontainer, wires a *upstreambun.DB through the
 // project's NewBunDB, creates the fixture table, and registers cleanup that
 // drops it. Returns the live db handle and a bus the test can inspect.
-func setupBunTx(t *testing.T) (*bun.DB, *eventsmemory.Bus) {
+func setupBunTx(t *testing.T) (*upstreambun.DB, *eventsmemory.Bus) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -88,7 +88,7 @@ func setupBunTx(t *testing.T) (*bun.DB, *eventsmemory.Bus) {
 			t.Logf("drop tx_test_widgets: %v", dropErr)
 		}
 		if closeErr := bunDB.Close(); closeErr != nil {
-			t.Logf("close bun.DB: %v", closeErr)
+			t.Logf("close upstreambun.DB: %v", closeErr)
 		}
 	})
 
@@ -103,7 +103,7 @@ func setupBunTx(t *testing.T) (*bun.DB, *eventsmemory.Bus) {
 // truncateWidgets clears the fixture between sub-tests sharing the same
 // containerised Postgres. Cheaper than tearing the table down and recreating
 // it; safe because the schema is invariant across the suite.
-func truncateWidgets(t *testing.T, bunDB *bun.DB) {
+func truncateWidgets(t *testing.T, bunDB *upstreambun.DB) {
 	t.Helper()
 	if _, err := bunDB.ExecContext(context.Background(), truncateWidgetsSQL); err != nil {
 		t.Fatalf("truncate tx_test_widgets: %v", err)
@@ -123,12 +123,12 @@ func txTestLogger() *slog.Logger {
 
 // widgetRepository is the AC-mandated inline repo. It resolves the active
 // bun handle via TxFromContext so Stage-time inserts join the live tx; when
-// called outside any Run it falls back to the base *bun.DB.
+// called outside any Run it falls back to the base *upstreambun.DB.
 type widgetRepository struct {
-	db *bun.DB
+	db *upstreambun.DB
 }
 
-func newWidgetRepository(db *bun.DB) *widgetRepository {
+func newWidgetRepository(db *upstreambun.DB) *widgetRepository {
 	return &widgetRepository{db: db}
 }
 
@@ -143,7 +143,7 @@ func (r *widgetRepository) Insert(ctx context.Context, id string, value int) err
 
 // widgetExists returns true iff a row with id is present in tx_test_widgets.
 // Lives outside the repository to keep the repo's surface minimal.
-func widgetExists(t *testing.T, bunDB *bun.DB, id string) bool {
+func widgetExists(t *testing.T, bunDB *upstreambun.DB, id string) bool {
 	t.Helper()
 	count, err := bunDB.NewSelect().Model((*widget)(nil)).Where("id = ?", id).Count(context.Background())
 	if err != nil {
@@ -205,7 +205,7 @@ func TestBunTx_HappyPath_StageInsertAndEvent(t *testing.T) {
 	repo := newWidgetRepository(bunDB)
 	ctx := context.Background()
 
-	txc := NewBunTransactionalContext(bunDB, bus, txTestLogger())
+	txc := NewTransactionalContext(bunDB, bus, txTestLogger())
 	err := txc.Run(ctx, func(rctx context.Context) error {
 		txc.Stage(func(sctx context.Context) error {
 			return repo.Insert(sctx, "a", 1)
@@ -232,7 +232,7 @@ func TestBunTx_WorkError_RollsBackAndDiscardsEvents(t *testing.T) {
 	ctx := context.Background()
 
 	workErr := errors.New("work failed")
-	txc := NewBunTransactionalContext(bunDB, bus, txTestLogger())
+	txc := NewTransactionalContext(bunDB, bus, txTestLogger())
 	err := txc.Run(ctx, func(rctx context.Context) error {
 		txc.Stage(func(sctx context.Context) error {
 			return repo.Insert(sctx, "w", 7)
@@ -259,7 +259,7 @@ func TestBunTx_StageClosureError_RollsBackAndDiscardsEvents(t *testing.T) {
 	ctx := context.Background()
 
 	stageErr := errors.New("stage closure failed")
-	txc := NewBunTransactionalContext(bunDB, bus, txTestLogger())
+	txc := NewTransactionalContext(bunDB, bus, txTestLogger())
 	err := txc.Run(ctx, func(rctx context.Context) error {
 		txc.Stage(func(sctx context.Context) error {
 			if insertErr := repo.Insert(sctx, "s", 5); insertErr != nil {
@@ -291,7 +291,7 @@ func TestBunTx_MultipleStages_OrderPreservedAndAllCommit(t *testing.T) {
 	repo := newWidgetRepository(bunDB)
 	ctx := context.Background()
 
-	txc := NewBunTransactionalContext(bunDB, bus, txTestLogger())
+	txc := NewTransactionalContext(bunDB, bus, txTestLogger())
 	err := txc.Run(ctx, func(rctx context.Context) error {
 		txc.Stage(func(sctx context.Context) error { return repo.Insert(sctx, "a", 1) })
 		txc.StageEvent(testEvent{name: "E1"})
@@ -328,7 +328,7 @@ func TestBunTx_StagedEventsPublishAfterCommit(t *testing.T) {
 	repo := newWidgetRepository(bunDB)
 	ctx := context.Background()
 
-	txc := NewBunTransactionalContext(bunDB, bus, txTestLogger())
+	txc := NewTransactionalContext(bunDB, bus, txTestLogger())
 	err := txc.Run(ctx, func(rctx context.Context) error {
 		txc.Stage(func(sctx context.Context) error { return repo.Insert(sctx, "after", 1) })
 		txc.StageEvent(testEvent{name: "TestEvent"})
@@ -350,7 +350,7 @@ func TestBunTx_BusPublishFailure_DoesNotRollbackCommit(t *testing.T) {
 	repo := newWidgetRepository(bunDB)
 	ctx := context.Background()
 
-	txc := NewBunTransactionalContext(bunDB, bus, logger)
+	txc := NewTransactionalContext(bunDB, bus, logger)
 	err := txc.Run(ctx, func(rctx context.Context) error {
 		txc.Stage(func(sctx context.Context) error { return repo.Insert(sctx, "durable", 9) })
 		txc.StageEvent(testEvent{name: "Flaky"})
@@ -375,7 +375,7 @@ func TestBunTx_RepositoryFallback_OutsideRunUsesBaseDB(t *testing.T) {
 	ctx := context.Background()
 
 	// Direct insert, no Run, no TxFromContext-resolvable handle — repo must
-	// fall back to its injected *bun.DB.
+	// fall back to its injected *upstreambun.DB.
 	if err := repo.Insert(ctx, "direct", 42); err != nil {
 		t.Fatalf("repo.Insert outside Run: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestBunTx_TxFromContext_InsideRunReportsActiveTx(t *testing.T) {
 	ctx := context.Background()
 
 	var sawTx bool
-	txc := NewBunTransactionalContext(bunDB, bus, txTestLogger())
+	txc := NewTransactionalContext(bunDB, bus, txTestLogger())
 	err := txc.Run(ctx, func(rctx context.Context) error {
 		handle, ok := TxFromContext(rctx)
 		if !ok || handle == nil {

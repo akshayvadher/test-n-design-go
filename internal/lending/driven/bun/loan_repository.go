@@ -13,6 +13,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
+	txbun "github.com/akshayvadher/test-n-design-go/internal/shared/tx/bun"
 )
 
 // LoanRow is the bun-mapped persistent shape of a loan. JSON tags are
@@ -36,7 +37,7 @@ type LoanRow struct {
 // LoanRepository is the Postgres-backed lending.LoanRepository
 // implementation. SaveLoan stages the write inside the supplied
 // TransactionalContext so the INSERT runs against the live tx handle
-// resolved via tx.TxFromContext. Reads (FindLoanById, List*) bypass the
+// resolved via txbun.TxFromContext. Reads (FindLoanById, List*) bypass the
 // tx substrate and go directly through the base *bun.DB.
 type LoanRepository struct {
 	db *upstreambun.DB
@@ -139,7 +140,7 @@ func (r *LoanRepository) ListLoansForBook(ctx context.Context, bookId catalog.Bo
 // repo MUST honour the live tx so staged writes participate in the rollback
 // when the work function or another stage closure fails.
 func resolveBunHandle(ctx context.Context, db *upstreambun.DB) upstreambun.IDB {
-	if handle, ok := tx.TxFromContext(ctx); ok && handle != nil {
+	if handle, ok := txbun.TxFromContext(ctx); ok && handle != nil {
 		return handle
 	}
 	return db

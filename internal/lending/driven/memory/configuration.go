@@ -16,6 +16,7 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
 	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
+	txmemory "github.com/akshayvadher/test-n-design-go/internal/shared/tx/memory"
 )
 
 // Overrides is the test-substitution extension point for the lending
@@ -84,7 +85,7 @@ func NewFacadeWithOverrides(o Overrides) *lending.Facade {
 		// Close over the resolved bus so staged events publish through the
 		// same instance the facade's direct bus.Publish calls reach.
 		txFactory = func() tx.TransactionalContext {
-			return tx.NewInMemoryTransactionalContext(bus, logger)
+			return txmemory.NewTransactionalContext(bus, logger)
 		}
 	}
 	newID := o.NewID
