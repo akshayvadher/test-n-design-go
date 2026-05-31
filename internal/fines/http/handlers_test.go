@@ -317,6 +317,19 @@ func TestHandlers_FindFine_NotFound(t *testing.T) {
 	}
 }
 
+func TestHandlers_FindFine_BlankIdReturns400InvalidFine(t *testing.T) {
+	s := buildScene(t)
+	rec := send(s.router, newRequest(http.MethodGet, "/fines/%20%20"))
+	if got, want := rec.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("status: got %d, want %d (body=%s)", got, want, rec.Body.String())
+	}
+	var body errorBody
+	decodeBody(t, rec.Body, &body)
+	if body.Error != "invalid_fine" {
+		t.Errorf("error code: got %q, want %q", body.Error, "invalid_fine")
+	}
+}
+
 // -----------------------------------------------------------------------------
 // PayFine handler
 // -----------------------------------------------------------------------------
