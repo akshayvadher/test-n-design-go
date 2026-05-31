@@ -1,0 +1,26 @@
+# Manual HTTP probes for the categories module (Phase 4 / Slice 5).
+#
+# How to use:
+#   1. Start the server with `task run`.
+#   2. Open this file in JetBrains GoLand/IntelliJ or VSCode with the
+#      REST Client extension installed.
+#   3. Click the gutter icon next to a request to send it.
+#
+# Substitute <categoryId> after POST /categories returns one (or look
+# it up via `psql` against the dev database).
+
+@baseUrl = http://localhost:3000
+
+### POST {{baseUrl}}/categories — create a new category
+POST {{baseUrl}}/categories
+Content-Type: application/json
+
+{
+  "name": "Fiction"
+}
+
+### GET {{baseUrl}}/categories?startsWith=fi — list categories whose name starts with "fi"
+GET {{baseUrl}}/categories?startsWith=fi
+
+### GET {{baseUrl}}/categories/<categoryId> — read a single category
+GET {{baseUrl}}/categories/<categoryId>

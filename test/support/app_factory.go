@@ -16,6 +16,7 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/app"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	"github.com/akshayvadher/test-n-design-go/internal/categories"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
@@ -66,6 +67,7 @@ type BootedApp struct {
 	MembershipFacade *membership.Facade
 	LendingFacade    *lending.Facade
 	FinesFacade      *fines.Facade
+	CategoriesFacade *categories.Facade
 	Shutdown         func(ctx context.Context) error
 }
 
@@ -122,6 +124,7 @@ func BootApp(ctx context.Context, t testing.TB, cfg AppConfig) BootedApp {
 		MembershipFacade: wired.MembershipFacade,
 		LendingFacade:    wired.LendingFacade,
 		FinesFacade:      wired.FinesFacade,
+		CategoriesFacade: wired.CategoriesFacade,
 		Shutdown: func(stopCtx context.Context) error {
 			shutdownErr := server.Shutdown(stopCtx)
 			closeErr := wired.Close()

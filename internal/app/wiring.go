@@ -29,6 +29,8 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
+	"github.com/akshayvadher/test-n-design-go/internal/categories"
+	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/http"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
 	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/http"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
@@ -98,6 +100,13 @@ type Wired struct {
 	// to drive AssessFinesFor / ProcessOverdueLoans / PayFine against the
 	// same bun-backed repository the HTTP-driven writes hit.
 	FinesFacade *fines.Facade
+
+	// CategoriesFacade is the categories module's facade. Integration
+	// tests use it to assert that HTTP-driven writes actually persisted
+	// (e.g. by calling FindCategoryById against the same facade the
+	// router is bound to). Slice 5 wires it with the bun-backed
+	// repository so every HTTP-driven write hits Postgres.
+	CategoriesFacade *categories.Facade
 
 	// Bus is the in-process event bus the lending facade publishes
 	// LoanOpened / LoanReturned / ReservationQueued events through.
@@ -175,6 +184,12 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	})
 	fineshttp.Wire(router, fineshttp.Deps{Facade: finesFacade, Logger: deps.Logger, Clock: time.Now})
 
+	categoriesFacade := categories.NewFacadeWithOverrides(categories.Overrides{
+		Repository: categories.NewBunCategoryRepository(bunDB),
+		Logger:     deps.Logger,
+	})
+	categorieshttp.Wire(router, categorieshttp.Deps{Facade: categoriesFacade, Logger: deps.Logger})
+
 	return &Wired{
 		Router:           router,
 		DB:               bunDB,
@@ -182,6 +197,7 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 		MembershipFacade: membershipFacade,
 		LendingFacade:    lendingFacade,
 		FinesFacade:      finesFacade,
+		CategoriesFacade: categoriesFacade,
 		Bus:              bus,
 		Close:            buildCloser(bunDB, redisClient),
 	}, nil
@@ -270,6 +286,10 @@ func buildDomainErrorRegistry() *sharedhttp.DomainErrorRegistry {
 	registry.Register(&fines.FineNotFoundError{}, http.StatusNotFound, "fine_not_found")
 	registry.Register(&fines.FineAlreadyPaidError{}, http.StatusConflict, "fine_already_paid")
 	registry.Register(&fines.InvalidFineError{}, http.StatusBadRequest, "invalid_fine")
+	registry.Register(&categories.CategoryNotFoundError{}, http.StatusNotFound, "category_not_found")
+	registry.Register(&categories.DuplicateCategoryError{}, http.StatusConflict, "duplicate_category")
+	registry.Register(&categories.InvalidCategoryError{}, http.StatusBadRequest, "invalid_category")
+	registry.Register(&categories.InvalidCategoriesQueryError{}, http.StatusBadRequest, "invalid_categories_query")
 	return registry
 }
 
