@@ -1,4 +1,4 @@
-package categories
+package bun
 
 import (
 	"context"
@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/uptrace/bun"
+	upstreambun "github.com/uptrace/bun"
+
+	"github.com/akshayvadher/test-n-design-go/internal/categories"
 )
 
 // uniqueViolationSQLState is the Postgres SQLSTATE for a unique
@@ -41,46 +43,46 @@ func isUniqueViolation(err error) bool {
 
 // CategoryRow is the bun-mapped persistent shape of a category. JSON
 // tags are intentionally absent — this struct never crosses the HTTP
-// boundary; the HTTP DTOs in internal/categories/http own that.
+// boundary; the HTTP DTOs in internal/categories/driving/http own that.
 //
 // Column names match migrations/0005_categories.sql verbatim.
 type CategoryRow struct {
-	bun.BaseModel `bun:"table:categories"`
+	upstreambun.BaseModel `bun:"table:categories"`
 
-	CategoryId CategoryId `bun:"category_id,pk"`
-	Name       string     `bun:"name,notnull"`
-	CreatedAt  time.Time  `bun:"created_at,notnull"`
+	CategoryId categories.CategoryId `bun:"category_id,pk"`
+	Name       string                `bun:"name,notnull"`
+	CreatedAt  time.Time             `bun:"created_at,notnull"`
 }
 
-// BunCategoryRepository is the Postgres-backed CategoryRepository
+// Repository is the Postgres-backed categories.CategoryRepository
 // implementation. Writes run directly against the base *bun.DB —
 // categories does NOT integrate with TransactionalContext (no
 // cross-aggregate writes, no events).
-type BunCategoryRepository struct {
-	db *bun.DB
+type Repository struct {
+	db *upstreambun.DB
 }
 
-// Compile-time assertion that BunCategoryRepository satisfies
-// CategoryRepository. If a method signature drifts, the assertion fails
+// Compile-time assertion that *Repository satisfies the categories
+// driven port. If a method signature drifts, the assertion fails
 // before any test runs.
-var _ CategoryRepository = (*BunCategoryRepository)(nil)
+var _ categories.CategoryRepository = (*Repository)(nil)
 
-// NewBunCategoryRepository constructs a BunCategoryRepository bound to
-// db. The caller owns the *bun.DB lifecycle.
-func NewBunCategoryRepository(db *bun.DB) *BunCategoryRepository {
-	return &BunCategoryRepository{db: db}
+// NewRepository constructs a *Repository bound to db. The caller owns
+// the *bun.DB lifecycle.
+func NewRepository(db *upstreambun.DB) *Repository {
+	return &Repository{db: db}
 }
 
 // Save inserts category. On the Postgres unique-constraint violation
 // raised by categories_name_unique (a UNIQUE INDEX on LOWER(name)) the
-// error is translated to *DuplicateCategoryError so the HTTP layer
-// can return 409. Other errors are wrapped and propagated.
-func (r *BunCategoryRepository) Save(ctx context.Context, category CategoryDto) error {
+// error is translated to *categories.DuplicateCategoryError so the
+// HTTP layer can return 409. Other errors are wrapped and propagated.
+func (r *Repository) Save(ctx context.Context, category categories.CategoryDto) error {
 	row := toCategoryRow(category)
 	_, err := r.db.NewInsert().Model(&row).Exec(ctx)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return &DuplicateCategoryError{Name: category.Name}
+			return &categories.DuplicateCategoryError{Name: category.Name}
 		}
 		return fmt.Errorf("save category %q: %w", category.CategoryId, err)
 	}
@@ -90,7 +92,7 @@ func (r *BunCategoryRepository) Save(ctx context.Context, category CategoryDto) 
 // FindById returns the category by primary key, or (nil, nil) on miss.
 // A 22P02 (invalid_text_representation) error from a non-UUID id also
 // collapses to (nil, nil) so the HTTP layer returns 404 for garbage ids.
-func (r *BunCategoryRepository) FindById(ctx context.Context, id CategoryId) (*CategoryDto, error) {
+func (r *Repository) FindById(ctx context.Context, id categories.CategoryId) (*categories.CategoryDto, error) {
 	var row CategoryRow
 	err := r.db.NewSelect().Model(&row).Where("category_id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) || isInvalidUUIDSyntax(err) {
@@ -105,19 +107,19 @@ func (r *BunCategoryRepository) FindById(ctx context.Context, id CategoryId) (*C
 
 // FindByNamePrefix returns every category whose name starts with
 // prefix (case-insensitively), sorted ascending by lower(name), capped
-// at MaxPrefixResults.
-func (r *BunCategoryRepository) FindByNamePrefix(ctx context.Context, prefix string) ([]CategoryDto, error) {
+// at categories.MaxPrefixResults.
+func (r *Repository) FindByNamePrefix(ctx context.Context, prefix string) ([]categories.CategoryDto, error) {
 	var rows []CategoryRow
 	err := r.db.NewSelect().
 		Model(&rows).
 		Where("LOWER(name) LIKE LOWER(?) || '%'", prefix).
 		OrderExpr("LOWER(name) ASC").
-		Limit(MaxPrefixResults).
+		Limit(categories.MaxPrefixResults).
 		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("find categories by name prefix %q: %w", prefix, err)
 	}
-	out := make([]CategoryDto, 0, len(rows))
+	out := make([]categories.CategoryDto, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, toCategoryDto(row))
 	}
@@ -125,7 +127,7 @@ func (r *BunCategoryRepository) FindByNamePrefix(ctx context.Context, prefix str
 }
 
 // toCategoryRow projects a domain CategoryDto into the bun row.
-func toCategoryRow(category CategoryDto) CategoryRow {
+func toCategoryRow(category categories.CategoryDto) CategoryRow {
 	return CategoryRow{
 		CategoryId: category.CategoryId,
 		Name:       category.Name,
@@ -134,8 +136,8 @@ func toCategoryRow(category CategoryDto) CategoryRow {
 }
 
 // toCategoryDto projects a bun row back into a domain CategoryDto.
-func toCategoryDto(row CategoryRow) CategoryDto {
-	return CategoryDto{
+func toCategoryDto(row CategoryRow) categories.CategoryDto {
+	return categories.CategoryDto{
 		CategoryId: row.CategoryId,
 		Name:       row.Name,
 		CreatedAt:  row.CreatedAt,

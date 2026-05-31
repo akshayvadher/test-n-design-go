@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 
@@ -30,7 +31,8 @@ import (
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
 	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
 	"github.com/akshayvadher/test-n-design-go/internal/categories"
-	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/http"
+	categoriesbun "github.com/akshayvadher/test-n-design-go/internal/categories/driven/bun"
+	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/chat"
 	chathttp "github.com/akshayvadher/test-n-design-go/internal/chat/http"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
@@ -214,10 +216,12 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	})
 	fineshttp.Wire(router, fineshttp.Deps{Facade: finesFacade, Logger: deps.Logger, Clock: time.Now})
 
-	categoriesFacade := categories.NewFacadeWithOverrides(categories.Overrides{
-		Repository: categories.NewBunCategoryRepository(bunDB),
-		Logger:     deps.Logger,
-	})
+	categoriesFacade := categories.NewFacade(
+		categoriesbun.NewRepository(bunDB),
+		uuid.NewString,
+		time.Now,
+		deps.Logger,
+	)
 	categorieshttp.Wire(router, categorieshttp.Deps{Facade: categoriesFacade, Logger: deps.Logger})
 
 	chatFacade := chat.NewFacade(chatgateway.NewInMemoryChatGateway(), deps.Logger)

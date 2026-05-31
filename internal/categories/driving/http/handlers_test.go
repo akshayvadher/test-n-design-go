@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/akshayvadher/test-n-design-go/internal/categories"
+	categoriesmemory "github.com/akshayvadher/test-n-design-go/internal/categories/driven/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
 )
 
@@ -44,7 +45,7 @@ func silentLogger() *slog.Logger {
 func buildRouter(t *testing.T) (chi.Router, *categories.Facade) {
 	t.Helper()
 	logger := silentLogger()
-	facade := categories.NewFacadeWithOverrides(categories.Overrides{
+	facade := categoriesmemory.NewFacadeWithOverrides(categoriesmemory.Overrides{
 		NewID:  sequentialIds("cat"),
 		Clock:  func() time.Time { return time.Date(2030, 1, 15, 0, 0, 0, 0, time.UTC) },
 		Logger: logger,

@@ -2,9 +2,16 @@
 // a port of apps/library/src/categories/categories.facade.spec.ts from
 // the source TypeScript repository.
 //
+// Lives in package categories_test (external test package) so it can
+// import the in-memory adapter from internal/categories/driven/memory
+// without creating an import cycle: the memory package depends on
+// internal/categories, so an in-package test that imported the memory
+// adapter would close the loop. Every symbol is therefore qualified
+// with the categories.* prefix.
+//
 // Stdlib testing only — t.Run for nested describe blocks, errors.As
 // for typed-error assertions, no testify, no mock library.
-package categories
+package categories_test
 
 import (
 	"context"
@@ -14,6 +21,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/akshayvadher/test-n-design-go/internal/categories"
+	categoriesmemory "github.com/akshayvadher/test-n-design-go/internal/categories/driven/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -40,8 +50,8 @@ func sequentialIds(prefix string) func() string {
 
 // buildFacadeWithClock constructs a Facade with deterministic ids and
 // the supplied clock. Used by tests that need to advance the clock.
-func buildFacadeWithClock(clock func() time.Time) *Facade {
-	return NewFacadeWithOverrides(Overrides{
+func buildFacadeWithClock(clock func() time.Time) *categories.Facade {
+	return categoriesmemory.NewFacadeWithOverrides(categoriesmemory.Overrides{
 		NewID: sequentialIds("category"),
 		Clock: clock,
 	})
@@ -49,11 +59,11 @@ func buildFacadeWithClock(clock func() time.Time) *Facade {
 
 // buildFacade constructs a Facade with deterministic ids and a frozen
 // clock at fixedNow.
-func buildFacade() *Facade {
+func buildFacade() *categories.Facade {
 	return buildFacadeWithClock(func() time.Time { return fixedNow })
 }
 
-func mustCreateCategory(t *testing.T, facade *Facade, name string) CategoryDto {
+func mustCreateCategory(t *testing.T, facade *categories.Facade, name string) categories.CategoryDto {
 	t.Helper()
 	category, err := facade.CreateCategory(context.Background(), name)
 	if err != nil {
@@ -64,7 +74,7 @@ func mustCreateCategory(t *testing.T, facade *Facade, name string) CategoryDto {
 
 func assertInvalidCategory(t *testing.T, err error) {
 	t.Helper()
-	var target *InvalidCategoryError
+	var target *categories.InvalidCategoryError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected *InvalidCategoryError, got %T (%v)", err, err)
 	}
@@ -72,7 +82,7 @@ func assertInvalidCategory(t *testing.T, err error) {
 
 func assertCategoryNotFound(t *testing.T, err error) {
 	t.Helper()
-	var target *CategoryNotFoundError
+	var target *categories.CategoryNotFoundError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected *CategoryNotFoundError, got %T (%v)", err, err)
 	}
@@ -80,7 +90,7 @@ func assertCategoryNotFound(t *testing.T, err error) {
 
 func assertDuplicateCategory(t *testing.T, err error) {
 	t.Helper()
-	var target *DuplicateCategoryError
+	var target *categories.DuplicateCategoryError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected *DuplicateCategoryError, got %T (%v)", err, err)
 	}
@@ -88,7 +98,7 @@ func assertDuplicateCategory(t *testing.T, err error) {
 
 func assertInvalidCategoriesQuery(t *testing.T, err error) {
 	t.Helper()
-	var target *InvalidCategoriesQueryError
+	var target *categories.InvalidCategoriesQueryError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected *InvalidCategoriesQueryError, got %T (%v)", err, err)
 	}
@@ -108,7 +118,7 @@ func TestCategoriesFacade(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateCategory: %v", err)
 		}
-		if category.CategoryId != CategoryId("category-1") {
+		if category.CategoryId != categories.CategoryId("category-1") {
 			t.Errorf("CategoryId: got %q, want %q", category.CategoryId, "category-1")
 		}
 		if category.Name != "Fiction" {
@@ -146,7 +156,7 @@ func TestCategoriesFacade(t *testing.T) {
 		facade := buildFacade()
 
 		_, err := facade.CreateCategory(ctx, strings.Repeat("a", 101))
-		var invalid *InvalidCategoryError
+		var invalid *categories.InvalidCategoryError
 		if !errors.As(err, &invalid) {
 			t.Fatalf("got %T (%v), want *InvalidCategoryError", err, err)
 		}
@@ -215,7 +225,7 @@ func TestCategoriesFacade(t *testing.T) {
 	t.Run("FindCategoryById returns *CategoryNotFoundError for an unknown id", func(t *testing.T) {
 		facade := buildFacade()
 
-		_, err := facade.FindCategoryById(ctx, CategoryId("unknown-id"))
+		_, err := facade.FindCategoryById(ctx, categories.CategoryId("unknown-id"))
 		assertCategoryNotFound(t, err)
 	})
 

@@ -1,4 +1,4 @@
-package categories
+package memory
 
 import (
 	"io"
@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/akshayvadher/test-n-design-go/internal/categories"
 )
 
 // Overrides is the test-substitution extension point for the categories
@@ -13,21 +15,22 @@ import (
 // default." Tests construct it with only the fields they need to swap
 // (typically NewID and Clock for deterministic ids + timestamps).
 type Overrides struct {
-	Repository CategoryRepository
+	Repository categories.CategoryRepository
 	NewID      func() string
 	Clock      func() time.Time
 	Logger     *slog.Logger
 }
 
-// NewFacadeWithOverrides constructs a Facade applying the supplied
-// Overrides on top of the in-memory defaults. The defaults wire a
-// fresh in-memory repository, a UUID-string id generator, time.Now as
-// the clock, and a silent slog logger. Tests reuse this constructor so
-// each test gets a clean substrate without restating the wiring.
-func NewFacadeWithOverrides(o Overrides) *Facade {
+// NewFacadeWithOverrides constructs a categories.Facade applying the
+// supplied Overrides on top of the in-memory defaults. The defaults
+// wire a fresh in-memory Repository, a UUID-string id generator,
+// time.Now as the clock, and a silent slog logger. Tests reuse this
+// constructor so each test gets a clean substrate without restating
+// the wiring.
+func NewFacadeWithOverrides(o Overrides) *categories.Facade {
 	repository := o.Repository
 	if repository == nil {
-		repository = NewInMemoryCategoryRepository()
+		repository = NewRepository()
 	}
 	newID := o.NewID
 	if newID == nil {
@@ -41,5 +44,5 @@ func NewFacadeWithOverrides(o Overrides) *Facade {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return NewFacade(repository, newID, clock, logger)
+	return categories.NewFacade(repository, newID, clock, logger)
 }
