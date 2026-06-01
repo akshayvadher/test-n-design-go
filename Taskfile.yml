@@ -125,6 +125,11 @@ tasks:
     cmds:
       - atlas migrate status --env local
 
+  migrate:bun:
+    desc: "PROTOTYPE: apply embedded migrations in-process via bun (no atlas CLI). Requires `task up`."
+    cmds:
+      - go run {{.CMD_PKG}} migrate
+
   fmt:
     desc: Format Go sources and tidy module deps.
     cmds:
@@ -189,6 +194,11 @@ tasks:
     desc: Build the production OCI image via podman (multi-stage, distroless).
     cmds:
       - podman build -t test-n-design-go:latest .
+
+  image:migrations:
+    desc: Build the migrations OCI image (atlas CLI + versioned migrations/) for the k8s initContainer.
+    cmds:
+      - podman build -f Dockerfile.migrations -t test-n-design-go-migrations:latest .
 
   image:run:
     desc: Run the built image against the local podman-compose postgres + redis.
