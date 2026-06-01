@@ -33,7 +33,14 @@ func RunBunMigrations(ctx context.Context, bunDB *bun.DB, logger *slog.Logger) e
 		return fmt.Errorf("discover embedded migrations: %w", err)
 	}
 
-	migrator := migrate.NewMigrator(bunDB, set)
+	// WithMarkAppliedOnSuccess(true) is mandatory, not optional. Bun's DEFAULT
+	// is to insert the bun_migrations row BEFORE running the migration — and
+	// that insert commits on a separate connection from the .tx.up.sql's own
+	// transaction. So a migration that fails and rolls back its DDL would still
+	// be recorded as applied, and the next run would skip it forever, leaving
+	// the schema permanently short a table. Marking applied only AFTER the Up
+	// succeeds makes a failed migration retry on the next run.
+	migrator := migrate.NewMigrator(bunDB, set, migrate.WithMarkAppliedOnSuccess(true))
 	if err := migrator.Init(ctx); err != nil {
 		return fmt.Errorf("init bun migration tables: %w", err)
 	}
