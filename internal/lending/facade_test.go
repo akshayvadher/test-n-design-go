@@ -12,7 +12,7 @@
 // flakyBus) live at the bottom of the file. They are unexported and
 // never imported by any other package — the proof that fault-injection
 // state never leaks into production.
-package lending
+package lending_test
 
 import (
 	"bytes"
@@ -27,9 +27,15 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
+	"github.com/akshayvadher/test-n-design-go/internal/lending"
+	lendingmemory "github.com/akshayvadher/test-n-design-go/internal/lending/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
+	txmemory "github.com/akshayvadher/test-n-design-go/internal/shared/tx/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -59,11 +65,11 @@ func sequentialIds(prefix string) func() string {
 // facades + the bus + the captured-events slice. Every test in the file
 // builds a fresh scene so substrates do not leak across cases.
 type scene struct {
-	facade     *Facade
+	facade     *lending.Facade
 	catalog    *catalog.Facade
 	membership *membership.Facade
-	bus        *events.InMemoryEventBus
-	loans      *InMemoryLoanRepository
+	bus        *eventsmemory.Bus
+	loans      *lendingmemory.LoanRepository
 	collected  *collectedEvents
 }
 
@@ -106,14 +112,14 @@ func (c *collectedEvents) reset() {
 // captured-events subscription for the three Phase-3 event types.
 func buildScene(t *testing.T) *scene {
 	t.Helper()
-	return buildSceneWith(t, Overrides{})
+	return buildSceneWith(t, lendingmemory.Overrides{})
 }
 
 // buildSceneWith mirrors buildScene but lets the caller pre-seed
-// Overrides fields (a custom loan/reservation repository, a wrapped
+// lending.Overrides fields (a custom loan/reservation repository, a wrapped
 // catalog facade, a custom bus). Fields the caller leaves zero are
 // filled with the test defaults.
-func buildSceneWith(t *testing.T, extra Overrides) *scene {
+func buildSceneWith(t *testing.T, extra lendingmemory.Overrides) *scene {
 	t.Helper()
 
 	logger := extra.Logger
@@ -123,40 +129,40 @@ func buildSceneWith(t *testing.T, extra Overrides) *scene {
 
 	catalogFacade := extra.Catalog
 	if catalogFacade == nil {
-		catalogFacade = catalog.NewFacadeWithOverrides(catalog.Overrides{
+		catalogFacade = catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 			NewID:  sequentialIds("cat"),
 			Logger: logger,
 		})
 	}
 	membershipFacade := extra.Membership
 	if membershipFacade == nil {
-		membershipFacade = membership.NewFacadeWithOverrides(membership.Overrides{
+		membershipFacade = membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{
 			NewID:  sequentialIds("mem"),
 			Logger: logger,
 		})
 	}
 
 	loansRepo := extra.Loans
-	var inMemoryLoans *InMemoryLoanRepository
+	var inMemoryLoans *lendingmemory.LoanRepository
 	if loansRepo == nil {
-		inMemoryLoans = NewInMemoryLoanRepository()
+		inMemoryLoans = lendingmemory.NewLoanRepository()
 		loansRepo = inMemoryLoans
 	}
 	reservationsRepo := extra.Reservations
 	if reservationsRepo == nil {
-		reservationsRepo = NewInMemoryReservationRepository()
+		reservationsRepo = lendingmemory.NewReservationRepository()
 	}
 
 	bus := extra.Bus
-	var inMemoryBus *events.InMemoryEventBus
+	var inMemoryBus *eventsmemory.Bus
 	if bus == nil {
-		inMemoryBus = events.NewInMemoryEventBus(logger)
+		inMemoryBus = eventsmemory.NewBus(logger)
 		bus = inMemoryBus
-	} else if asInMem, ok := bus.(*events.InMemoryEventBus); ok {
+	} else if asInMem, ok := bus.(*eventsmemory.Bus); ok {
 		inMemoryBus = asInMem
 	}
 
-	overrides := Overrides{
+	overrides := lendingmemory.Overrides{
 		Catalog:       catalogFacade,
 		Membership:    membershipFacade,
 		AccessControl: extra.AccessControl,
@@ -175,7 +181,7 @@ func buildSceneWith(t *testing.T, extra Overrides) *scene {
 		overrides.Clock = fixedClock
 	}
 
-	facade := NewFacadeWithOverrides(overrides)
+	facade := lendingmemory.NewFacadeWithOverrides(overrides)
 
 	collected := &collectedEvents{}
 	subscribe := func(eventType string) {
@@ -262,10 +268,10 @@ func accountAuth(memberId membership.MemberId) accesscontrol.AuthUser {
 func newRecordingCatalog(t *testing.T, journal *journalT) (*catalog.Facade, *recordingCopyMutationsRepository) {
 	t.Helper()
 	repo := &recordingCopyMutationsRepository{
-		delegate: catalog.NewInMemoryRepository(),
+		delegate: catalogmemory.NewRepository(),
 		journal:  journal,
 	}
-	facade := catalog.NewFacadeWithOverrides(catalog.Overrides{
+	facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		Repository: repo,
 		NewID:      sequentialIds("cat"),
 	})
@@ -278,9 +284,9 @@ func newRecordingCatalog(t *testing.T, journal *journalT) (*catalog.Facade, *rec
 func newThrowingCatalog(t *testing.T) (*catalog.Facade, *throwingOnceCopyMutationsRepository) {
 	t.Helper()
 	repo := &throwingOnceCopyMutationsRepository{
-		delegate: catalog.NewInMemoryRepository(),
+		delegate: catalogmemory.NewRepository(),
 	}
-	facade := catalog.NewFacadeWithOverrides(catalog.Overrides{
+	facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		Repository: repo,
 		NewID:      sequentialIds("cat"),
 	})
@@ -288,7 +294,7 @@ func newThrowingCatalog(t *testing.T) (*catalog.Facade, *throwingOnceCopyMutatio
 }
 
 // -----------------------------------------------------------------------------
-// Facade.Borrow — happy path
+// lending.Facade.Borrow — happy path
 // -----------------------------------------------------------------------------
 
 func TestLendingFacade_Borrow_OpensLoanAndEmitsEvent(t *testing.T) {
@@ -317,7 +323,7 @@ func TestLendingFacade_Borrow_OpensLoanAndEmitsEvent(t *testing.T) {
 	if !loan.BorrowedAt.Equal(fixedNow) {
 		t.Errorf("loan.BorrowedAt: got %v, want %v", loan.BorrowedAt, fixedNow)
 	}
-	wantDue := fixedNow.AddDate(0, 0, LoanDurationDays)
+	wantDue := fixedNow.AddDate(0, 0, lending.LoanDurationDays)
 	if !loan.DueDate.Equal(wantDue) {
 		t.Errorf("loan.DueDate: got %v, want %v", loan.DueDate, wantDue)
 	}
@@ -334,11 +340,11 @@ func TestLendingFacade_Borrow_OpensLoanAndEmitsEvent(t *testing.T) {
 	}
 
 	if got := s.collected.types(); !equalStrings(got, []string{"LoanOpened"}) {
-		t.Errorf("event types: got %v, want [LoanOpened]", got)
+		t.Errorf("event types: got %v, want [lending.LoanOpened]", got)
 	}
-	publishedLoan := s.collected.snapshot()[0].(LoanOpened)
+	publishedLoan := s.collected.snapshot()[0].(lending.LoanOpened)
 	if publishedLoan.LoanId != loan.LoanId || publishedLoan.MemberId != loan.MemberId || publishedLoan.CopyId != loan.CopyId || publishedLoan.BookId != loan.BookId {
-		t.Errorf("LoanOpened payload: got %+v, want fields matching %+v", publishedLoan, loan)
+		t.Errorf("lending.LoanOpened payload: got %+v, want fields matching %+v", publishedLoan, loan)
 	}
 }
 
@@ -362,7 +368,7 @@ func TestLendingFacade_Borrow_MarksCopyUnavailable(t *testing.T) {
 }
 
 // TestLendingFacade_Borrow_PostCommitOrdering is the canonical AC for the
-// post-commit rule: the staged LoanOpened event publishes BEFORE the
+// post-commit rule: the staged lending.LoanOpened event publishes BEFORE the
 // catalog mark-unavailable runs, because staged events fire during commit
 // and the catalog call happens after Run returns.
 func TestLendingFacade_Borrow_PostCommitOrdering(t *testing.T) {
@@ -370,7 +376,7 @@ func TestLendingFacade_Borrow_PostCommitOrdering(t *testing.T) {
 	journal := &journalT{}
 
 	recordingCatalog, _ := newRecordingCatalog(t, journal)
-	s := buildSceneWith(t, Overrides{Catalog: recordingCatalog})
+	s := buildSceneWith(t, lendingmemory.Overrides{Catalog: recordingCatalog})
 
 	_, copyDto := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
@@ -392,7 +398,7 @@ func TestLendingFacade_Borrow_PostCommitOrdering(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Facade.Borrow — authorization + eligibility
+// lending.Facade.Borrow — authorization + eligibility
 // -----------------------------------------------------------------------------
 
 func TestLendingFacade_Borrow_RejectsAccountRole(t *testing.T) {
@@ -446,9 +452,9 @@ func TestLendingFacade_Borrow_RejectsSuspendedMember(t *testing.T) {
 	}
 
 	_, err := s.facade.Borrow(ctx, memberAuth(alice.MemberId), copyDto.CopyId)
-	var target *MemberIneligibleError
+	var target *lending.MemberIneligibleError
 	if !errors.As(err, &target) {
-		t.Fatalf("Borrow: got %v, want *MemberIneligibleError", err)
+		t.Fatalf("Borrow: got %v, want *lending.MemberIneligibleError", err)
 	}
 	if target.Reason != "SUSPENDED" {
 		t.Errorf("Reason: got %q, want SUSPENDED", target.Reason)
@@ -480,12 +486,12 @@ func TestLendingFacade_Borrow_RejectsUnavailableCopy(t *testing.T) {
 	s.collected.reset()
 
 	_, err := s.facade.Borrow(ctx, memberAuth(bob.MemberId), copyDto.CopyId)
-	var target *CopyUnavailableError
+	var target *lending.CopyUnavailableError
 	if !errors.As(err, &target) {
-		t.Fatalf("Borrow (bob): got %v, want *CopyUnavailableError", err)
+		t.Fatalf("Borrow (bob): got %v, want *lending.CopyUnavailableError", err)
 	}
 	if target.CopyId != copyDto.CopyId {
-		t.Errorf("CopyUnavailableError.CopyId: got %q, want %q", target.CopyId, copyDto.CopyId)
+		t.Errorf("lending.CopyUnavailableError.CopyId: got %q, want %q", target.CopyId, copyDto.CopyId)
 	}
 
 	bobLoans, _ := s.loans.ListLoansForMember(ctx, bob.MemberId)
@@ -518,13 +524,13 @@ func TestLendingFacade_Borrow_RejectsUnknownCopy(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Facade.Borrow — tx atomicity
+// lending.Facade.Borrow — tx atomicity
 // -----------------------------------------------------------------------------
 
 func TestLendingFacade_Borrow_RollsBackOnLoanSaveFailure(t *testing.T) {
 	ctx := context.Background()
 	loans := newThrowingOnceLoanRepository()
-	s := buildSceneWith(t, Overrides{Loans: loans})
+	s := buildSceneWith(t, lendingmemory.Overrides{Loans: loans})
 	_, copyDto := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
 
@@ -552,7 +558,7 @@ func TestLendingFacade_Borrow_RollsBackOnLoanSaveFailure(t *testing.T) {
 func TestLendingFacade_Borrow_CatalogFailureAfterCommitLeavesLoanPersisted(t *testing.T) {
 	ctx := context.Background()
 	throwingCatalog, throwingRepo := newThrowingCatalog(t)
-	s := buildSceneWith(t, Overrides{Catalog: throwingCatalog})
+	s := buildSceneWith(t, lendingmemory.Overrides{Catalog: throwingCatalog})
 	_, copyDto := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
 
@@ -569,7 +575,7 @@ func TestLendingFacade_Borrow_CatalogFailureAfterCommitLeavesLoanPersisted(t *te
 		t.Errorf("loan repo: got %d loans, want 1 (tx committed before failure)", len(stored))
 	}
 	if got := s.collected.types(); !equalStrings(got, []string{"LoanOpened"}) {
-		t.Errorf("events: got %v, want [LoanOpened] (published during commit)", got)
+		t.Errorf("events: got %v, want [lending.LoanOpened] (published during commit)", got)
 	}
 	got, _ := throwingCatalog.FindCopy(ctx, copyDto.CopyId)
 	if got.Status != catalog.CopyStatusAvailable {
@@ -578,7 +584,7 @@ func TestLendingFacade_Borrow_CatalogFailureAfterCommitLeavesLoanPersisted(t *te
 }
 
 // -----------------------------------------------------------------------------
-// Facade.Reserve
+// lending.Facade.Reserve
 // -----------------------------------------------------------------------------
 
 func TestLendingFacade_Reserve_PersistsAndEmitsEvent(t *testing.T) {
@@ -609,11 +615,11 @@ func TestLendingFacade_Reserve_PersistsAndEmitsEvent(t *testing.T) {
 	}
 
 	if got := s.collected.types(); !equalStrings(got, []string{"ReservationQueued"}) {
-		t.Errorf("event types: got %v, want [ReservationQueued]", got)
+		t.Errorf("event types: got %v, want [lending.ReservationQueued]", got)
 	}
-	published := s.collected.snapshot()[0].(ReservationQueued)
+	published := s.collected.snapshot()[0].(lending.ReservationQueued)
 	if published.ReservationId != reservation.ReservationId || published.MemberId != reservation.MemberId || published.BookId != reservation.BookId {
-		t.Errorf("ReservationQueued payload: got %+v, want fields matching %+v", published, reservation)
+		t.Errorf("lending.ReservationQueued payload: got %+v, want fields matching %+v", published, reservation)
 	}
 }
 
@@ -627,9 +633,9 @@ func TestLendingFacade_Reserve_RejectsSuspendedMember(t *testing.T) {
 	}
 
 	_, err := s.facade.Reserve(ctx, alice.MemberId, book.BookId)
-	var target *MemberIneligibleError
+	var target *lending.MemberIneligibleError
 	if !errors.As(err, &target) {
-		t.Fatalf("Reserve: got %v, want *MemberIneligibleError", err)
+		t.Fatalf("Reserve: got %v, want *lending.MemberIneligibleError", err)
 	}
 	if target.Reason != "SUSPENDED" {
 		t.Errorf("Reason: got %q, want SUSPENDED", target.Reason)
@@ -657,7 +663,7 @@ func TestLendingFacade_Reserve_RejectsUnknownMember(t *testing.T) {
 func TestLendingFacade_Reserve_RollsBackOnRepoFailure(t *testing.T) {
 	ctx := context.Background()
 	reservations := newThrowingOnceReservationRepository()
-	s := buildSceneWith(t, Overrides{Reservations: reservations})
+	s := buildSceneWith(t, lendingmemory.Overrides{Reservations: reservations})
 	book, _ := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
 
@@ -685,7 +691,7 @@ func TestLendingFacade_Reserve_DoesNotTouchCatalog(t *testing.T) {
 	ctx := context.Background()
 	journal := &journalT{}
 	recordingCatalog, _ := newRecordingCatalog(t, journal)
-	s := buildSceneWith(t, Overrides{Catalog: recordingCatalog})
+	s := buildSceneWith(t, lendingmemory.Overrides{Catalog: recordingCatalog})
 
 	book, _ := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
@@ -701,7 +707,7 @@ func TestLendingFacade_Reserve_DoesNotTouchCatalog(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Facade.ReturnLoan
+// lending.Facade.ReturnLoan
 // -----------------------------------------------------------------------------
 
 func TestLendingFacade_ReturnLoan_ClosesLoanAndEmitsEvent(t *testing.T) {
@@ -733,11 +739,11 @@ func TestLendingFacade_ReturnLoan_ClosesLoanAndEmitsEvent(t *testing.T) {
 	}
 
 	if got := s.collected.types(); !equalStrings(got, []string{"LoanReturned"}) {
-		t.Errorf("event types: got %v, want [LoanReturned]", got)
+		t.Errorf("event types: got %v, want [lending.LoanReturned]", got)
 	}
-	published := s.collected.snapshot()[0].(LoanReturned)
+	published := s.collected.snapshot()[0].(lending.LoanReturned)
 	if !published.ReturnedAt.Equal(fixedNow) {
-		t.Errorf("LoanReturned.ReturnedAt: got %v, want %v", published.ReturnedAt, fixedNow)
+		t.Errorf("lending.LoanReturned.ReturnedAt: got %v, want %v", published.ReturnedAt, fixedNow)
 	}
 }
 
@@ -763,13 +769,13 @@ func TestLendingFacade_ReturnLoan_MarksCopyAvailable(t *testing.T) {
 
 // TestLendingFacade_ReturnLoan_PostCommitOrdering is the canonical AC for
 // the ReturnLoan ordering rule: the catalog mark-available runs FIRST,
-// then LoanReturned publishes. Subscribers can rely on the fully-
+// then lending.LoanReturned publishes. Subscribers can rely on the fully-
 // consistent state.
 func TestLendingFacade_ReturnLoan_PostCommitOrdering(t *testing.T) {
 	ctx := context.Background()
 	journal := &journalT{}
 	recordingCatalog, _ := newRecordingCatalog(t, journal)
-	s := buildSceneWith(t, Overrides{Catalog: recordingCatalog})
+	s := buildSceneWith(t, lendingmemory.Overrides{Catalog: recordingCatalog})
 
 	_, copyDto := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
@@ -799,12 +805,12 @@ func TestLendingFacade_ReturnLoan_UnknownLoanReturnsNotFound(t *testing.T) {
 	s := buildScene(t)
 
 	_, err := s.facade.ReturnLoan(ctx, "never-issued")
-	var target *LoanNotFoundError
+	var target *lending.LoanNotFoundError
 	if !errors.As(err, &target) {
-		t.Fatalf("ReturnLoan: got %v, want *LoanNotFoundError", err)
+		t.Fatalf("ReturnLoan: got %v, want *lending.LoanNotFoundError", err)
 	}
 	if target.LoanId != "never-issued" {
-		t.Errorf("LoanNotFoundError.LoanId: got %q, want never-issued", target.LoanId)
+		t.Errorf("lending.LoanNotFoundError.LoanId: got %q, want never-issued", target.LoanId)
 	}
 	if got := s.collected.types(); len(got) != 0 {
 		t.Errorf("events: got %v, want none", got)
@@ -814,7 +820,7 @@ func TestLendingFacade_ReturnLoan_UnknownLoanReturnsNotFound(t *testing.T) {
 func TestLendingFacade_ReturnLoan_RollsBackOnLoanSaveFailure(t *testing.T) {
 	ctx := context.Background()
 	loans := newThrowingOnceLoanRepository()
-	s := buildSceneWith(t, Overrides{Loans: loans})
+	s := buildSceneWith(t, lendingmemory.Overrides{Loans: loans})
 	_, copyDto := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
 	loan, err := s.facade.Borrow(ctx, memberAuth(alice.MemberId), copyDto.CopyId)
@@ -850,7 +856,7 @@ func TestLendingFacade_ReturnLoan_RollsBackOnLoanSaveFailure(t *testing.T) {
 func TestLendingFacade_ReturnLoan_CatalogFailureBlocksEventPublish(t *testing.T) {
 	ctx := context.Background()
 	throwingCatalog, throwingRepo := newThrowingCatalog(t)
-	s := buildSceneWith(t, Overrides{Catalog: throwingCatalog})
+	s := buildSceneWith(t, lendingmemory.Overrides{Catalog: throwingCatalog})
 	_, copyDto := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
 	loan, err := s.facade.Borrow(ctx, memberAuth(alice.MemberId), copyDto.CopyId)
@@ -887,13 +893,13 @@ func TestLendingFacade_ReturnLoan_BusFailureIsLoggedNotSurfaced(t *testing.T) {
 
 	flaky := newFlakyBus(logger)
 	// Use a TxFactory that publishes through the same flaky bus so staged
-	// LoanOpened events route through the failure-aware path. We only arm
-	// failure for LoanReturned after Borrow completes — so Borrow's staged
-	// LoanOpened still publishes normally.
+	// lending.LoanOpened events route through the failure-aware path. We only arm
+	// failure for lending.LoanReturned after Borrow completes — so Borrow's staged
+	// lending.LoanOpened still publishes normally.
 	txFactory := func() tx.TransactionalContext {
-		return tx.NewInMemoryTransactionalContext(flaky, logger)
+		return txmemory.NewTransactionalContext(flaky, logger)
 	}
-	s := buildSceneWith(t, Overrides{Bus: flaky, TxFactory: txFactory, Logger: logger})
+	s := buildSceneWith(t, lendingmemory.Overrides{Bus: flaky, TxFactory: txFactory, Logger: logger})
 	_, copyDto := seedAvailableCopy(t, s, 1)
 	alice := registerMember(t, s, 1, "Alice")
 	loan, err := s.facade.Borrow(ctx, memberAuth(alice.MemberId), copyDto.CopyId)
@@ -938,7 +944,7 @@ func TestLendingFacade_ReturnLoan_IsNotIdempotent(t *testing.T) {
 	}
 
 	if got := s.collected.types(); !equalStrings(got, []string{"LoanReturned", "LoanReturned"}) {
-		t.Errorf("events: got %v, want two LoanReturned (no idempotency check)", got)
+		t.Errorf("events: got %v, want two lending.LoanReturned (no idempotency check)", got)
 	}
 }
 
@@ -992,7 +998,7 @@ func (j *journalT) reset() {
 // and journals every SaveCopy that flips a copy's Status. The journal
 // line is "catalog:MarkCopyUnavailable" or "catalog:MarkCopyAvailable"
 // depending on the new status. Other repository calls pass through. The
-// lending Facade holds *catalog.Facade (concrete type), so we cannot
+// lending lending.Facade holds *catalog.Facade (concrete type), so we cannot
 // wrap the facade itself — substituting the repository inside the facade
 // is the established Phase-2 pattern.
 type recordingCopyMutationsRepository struct {
@@ -1101,13 +1107,13 @@ func (t *throwingOnceCopyMutationsRepository) FindCopyById(ctx context.Context, 
 // a single-shot error for the next SaveLoan call. After the armed error
 // fires, the wrapper reverts to delegating cleanly.
 type throwingOnceLoanRepository struct {
-	delegate *InMemoryLoanRepository
+	delegate *lendingmemory.LoanRepository
 	mu       sync.Mutex
 	nextErr  error
 }
 
 func newThrowingOnceLoanRepository() *throwingOnceLoanRepository {
-	return &throwingOnceLoanRepository{delegate: NewInMemoryLoanRepository()}
+	return &throwingOnceLoanRepository{delegate: lendingmemory.NewLoanRepository()}
 }
 
 func (t *throwingOnceLoanRepository) armFailureOnNextSave(err error) {
@@ -1116,7 +1122,7 @@ func (t *throwingOnceLoanRepository) armFailureOnNextSave(err error) {
 	t.nextErr = err
 }
 
-func (t *throwingOnceLoanRepository) SaveLoan(ctx context.Context, loan LoanDto, txc tx.TransactionalContext) error {
+func (t *throwingOnceLoanRepository) SaveLoan(ctx context.Context, loan lending.LoanDto, txc tx.TransactionalContext) error {
 	t.mu.Lock()
 	armed := t.nextErr
 	t.nextErr = nil
@@ -1127,32 +1133,32 @@ func (t *throwingOnceLoanRepository) SaveLoan(ctx context.Context, loan LoanDto,
 	return t.delegate.SaveLoan(ctx, loan, txc)
 }
 
-func (t *throwingOnceLoanRepository) FindLoanById(ctx context.Context, loanId LoanId) (*LoanDto, error) {
+func (t *throwingOnceLoanRepository) FindLoanById(ctx context.Context, loanId lending.LoanId) (*lending.LoanDto, error) {
 	return t.delegate.FindLoanById(ctx, loanId)
 }
 
-func (t *throwingOnceLoanRepository) ListLoansForMember(ctx context.Context, memberId membership.MemberId) ([]LoanDto, error) {
+func (t *throwingOnceLoanRepository) ListLoansForMember(ctx context.Context, memberId membership.MemberId) ([]lending.LoanDto, error) {
 	return t.delegate.ListLoansForMember(ctx, memberId)
 }
 
-func (t *throwingOnceLoanRepository) ListLoansForBook(ctx context.Context, bookId catalog.BookId) ([]LoanDto, error) {
+func (t *throwingOnceLoanRepository) ListLoansForBook(ctx context.Context, bookId catalog.BookId) ([]lending.LoanDto, error) {
 	return t.delegate.ListLoansForBook(ctx, bookId)
 }
 
-func (t *throwingOnceLoanRepository) ListLoans(ctx context.Context) ([]LoanDto, error) {
+func (t *throwingOnceLoanRepository) ListLoans(ctx context.Context) ([]lending.LoanDto, error) {
 	return t.delegate.ListLoans(ctx)
 }
 
 // throwingOnceReservationRepository mirrors throwingOnceLoanRepository
 // for the Reserve atomicity test.
 type throwingOnceReservationRepository struct {
-	delegate *InMemoryReservationRepository
+	delegate *lendingmemory.ReservationRepository
 	mu       sync.Mutex
 	nextErr  error
 }
 
 func newThrowingOnceReservationRepository() *throwingOnceReservationRepository {
-	return &throwingOnceReservationRepository{delegate: NewInMemoryReservationRepository()}
+	return &throwingOnceReservationRepository{delegate: lendingmemory.NewReservationRepository()}
 }
 
 func (t *throwingOnceReservationRepository) armFailureOnNextSave(err error) {
@@ -1161,7 +1167,7 @@ func (t *throwingOnceReservationRepository) armFailureOnNextSave(err error) {
 	t.nextErr = err
 }
 
-func (t *throwingOnceReservationRepository) SaveReservation(ctx context.Context, reservation ReservationDto, txc tx.TransactionalContext) error {
+func (t *throwingOnceReservationRepository) SaveReservation(ctx context.Context, reservation lending.ReservationDto, txc tx.TransactionalContext) error {
 	t.mu.Lock()
 	armed := t.nextErr
 	t.nextErr = nil
@@ -1172,15 +1178,15 @@ func (t *throwingOnceReservationRepository) SaveReservation(ctx context.Context,
 	return t.delegate.SaveReservation(ctx, reservation, txc)
 }
 
-func (t *throwingOnceReservationRepository) FindReservationById(ctx context.Context, reservationId ReservationId) (*ReservationDto, error) {
+func (t *throwingOnceReservationRepository) FindReservationById(ctx context.Context, reservationId lending.ReservationId) (*lending.ReservationDto, error) {
 	return t.delegate.FindReservationById(ctx, reservationId)
 }
 
-func (t *throwingOnceReservationRepository) ListReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error) {
+func (t *throwingOnceReservationRepository) ListReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]lending.ReservationDto, error) {
 	return t.delegate.ListReservationsForBook(ctx, bookId)
 }
 
-func (t *throwingOnceReservationRepository) ListReservationsForMember(ctx context.Context, memberId membership.MemberId) ([]ReservationDto, error) {
+func (t *throwingOnceReservationRepository) ListReservationsForMember(ctx context.Context, memberId membership.MemberId) ([]lending.ReservationDto, error) {
 	return t.delegate.ListReservationsForMember(ctx, memberId)
 }
 
@@ -1188,7 +1194,7 @@ func (t *throwingOnceReservationRepository) PendingReservationCountForBook(ctx c
 	return t.delegate.PendingReservationCountForBook(ctx, bookId)
 }
 
-func (t *throwingOnceReservationRepository) ListPendingReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error) {
+func (t *throwingOnceReservationRepository) ListPendingReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]lending.ReservationDto, error) {
 	return t.delegate.ListPendingReservationsForBook(ctx, bookId)
 }
 
@@ -1198,13 +1204,13 @@ func (t *throwingOnceReservationRepository) ListPendingReservationsForBook(ctx c
 type flakyBus struct {
 	mu        sync.Mutex
 	failTypes map[string]error
-	delegate  *events.InMemoryEventBus
+	delegate  *eventsmemory.Bus
 }
 
 func newFlakyBus(logger *slog.Logger) *flakyBus {
 	return &flakyBus{
 		failTypes: map[string]error{},
-		delegate:  events.NewInMemoryEventBus(logger),
+		delegate:  eventsmemory.NewBus(logger),
 	}
 }
 

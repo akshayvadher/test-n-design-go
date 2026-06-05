@@ -23,27 +23,38 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
-	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/http"
+	catalogbun "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/bun"
+	cataloghttp "github.com/akshayvadher/test-n-design-go/internal/catalog/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/categories"
-	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/http"
+	categoriesbun "github.com/akshayvadher/test-n-design-go/internal/categories/driven/bun"
+	categorieshttp "github.com/akshayvadher/test-n-design-go/internal/categories/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/chat"
-	chathttp "github.com/akshayvadher/test-n-design-go/internal/chat/http"
+	chathttp "github.com/akshayvadher/test-n-design-go/internal/chat/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/fines"
-	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/http"
+	finesbun "github.com/akshayvadher/test-n-design-go/internal/fines/driven/bun"
+	fineshttp "github.com/akshayvadher/test-n-design-go/internal/fines/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
-	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/http"
+	lendingbun "github.com/akshayvadher/test-n-design-go/internal/lending/driven/bun"
+	lendinghttp "github.com/akshayvadher/test-n-design-go/internal/lending/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
-	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/http"
+	membershipbun "github.com/akshayvadher/test-n-design-go/internal/membership/driven/bun"
+	membershiphttp "github.com/akshayvadher/test-n-design-go/internal/membership/driving/http"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
+	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
+	bookcacheredis "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/redis"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway"
+	chatgatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/chatgateway/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	sharedhttp "github.com/akshayvadher/test-n-design-go/internal/shared/http"
+	isbngatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway/memory"
 )
 
 // Deps carries the inputs Wire needs from the caller. The caller (main or
@@ -61,7 +72,7 @@ type Deps struct {
 
 	// RedisURL is the Redis DSN (e.g. redis://localhost:6379/0). When set,
 	// Wire constructs a *redis.Client and wires the catalog facade with a
-	// bookcache.NewRedisBookCacheGateway. Empty means "use the in-memory
+	// bookcacheredis.NewCache. Empty means "use the in-memory
 	// cache" — the unit-test and Phase-1-style integration paths can omit
 	// Redis entirely without touching the network.
 	RedisURL string
@@ -177,22 +188,26 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	router := buildRouter(deps.Logger, registry)
 	router.Get("/healthz", healthzHandler)
 
-	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{
-		Repository:       catalog.NewBunRepository(bunDB),
-		BookCacheGateway: cache,
-		Logger:           deps.Logger,
-	})
+	catalogFacade := catalog.NewFacade(
+		catalogbun.NewRepository(bunDB),
+		uuid.NewString,
+		isbngatewaymemory.NewGateway(),
+		cache,
+		accesscontrol.NewFacade(),
+		deps.Logger,
+	)
 	cataloghttp.Wire(router, cataloghttp.Deps{Facade: catalogFacade, Logger: deps.Logger})
 
-	membershipFacade := membership.NewFacadeWithOverrides(membership.Overrides{
-		Repository: membership.NewBunRepository(bunDB),
-		Logger:     deps.Logger,
-	})
+	membershipFacade := membership.NewFacade(
+		membershipbun.NewRepository(bunDB),
+		uuid.NewString,
+		deps.Logger,
+	)
 	membershiphttp.Wire(router, membershiphttp.Deps{Facade: membershipFacade, Logger: deps.Logger})
 
-	bus := events.NewInMemoryEventBus(deps.Logger)
+	bus := eventsmemory.NewBus(deps.Logger)
 	accessControlFacade := accesscontrol.NewFacade()
-	lendingWiring := lending.WireBunFacade(
+	lendingWiring := lendingbun.WireFacade(
 		bunDB,
 		bus,
 		catalogFacade,
@@ -204,23 +219,27 @@ func Wire(ctx context.Context, deps Deps) (*Wired, error) {
 	lendinghttp.Wire(router, lendinghttp.Deps{Facade: lendingFacade, Logger: deps.Logger})
 
 	finesConfig := loadFinesConfig()
-	finesFacade := fines.NewFacadeWithOverrides(fines.Overrides{
-		Lending:    lendingFacade,
-		Membership: membershipFacade,
-		Repository: fines.NewBunFineRepository(bunDB),
-		Bus:        bus,
-		Config:     &finesConfig,
-		Logger:     deps.Logger,
-	})
+	finesFacade := fines.NewFacade(
+		lendingFacade,
+		membershipFacade,
+		finesbun.NewRepository(bunDB),
+		bus,
+		finesConfig,
+		uuid.NewString,
+		time.Now,
+		deps.Logger,
+	)
 	fineshttp.Wire(router, fineshttp.Deps{Facade: finesFacade, Logger: deps.Logger, Clock: time.Now})
 
-	categoriesFacade := categories.NewFacadeWithOverrides(categories.Overrides{
-		Repository: categories.NewBunCategoryRepository(bunDB),
-		Logger:     deps.Logger,
-	})
+	categoriesFacade := categories.NewFacade(
+		categoriesbun.NewRepository(bunDB),
+		uuid.NewString,
+		time.Now,
+		deps.Logger,
+	)
 	categorieshttp.Wire(router, categorieshttp.Deps{Facade: categoriesFacade, Logger: deps.Logger})
 
-	chatFacade := chat.NewFacade(chatgateway.NewInMemoryChatGateway(), deps.Logger)
+	chatFacade := chat.NewFacade(chatgatewaymemory.NewGateway(), deps.Logger)
 	chathttp.Wire(router, chathttp.Deps{Facade: chatFacade, Logger: deps.Logger})
 
 	autoLoanConsumer := lending.NewAutoLoanOnReturnConsumer(lending.AutoLoanOnReturnConsumerDeps{
@@ -291,14 +310,14 @@ func loadFinesConfig() fines.FinesConfig {
 // the unit-test and Phase-1-style integration paths skip Redis entirely.
 func buildBookCache(deps Deps) (bookcache.BookCacheGateway, *redis.Client, error) {
 	if deps.RedisURL == "" {
-		return bookcache.NewInMemoryBookCacheGateway(), nil, nil
+		return bookcachememory.NewCache(), nil, nil
 	}
 	opts, err := redis.ParseURL(deps.RedisURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse redis url: %w", err)
 	}
 	client := redis.NewClient(opts)
-	return bookcache.NewRedisBookCacheGateway(client, bookcache.DefaultRedisTTL, deps.Logger), client, nil
+	return bookcacheredis.NewCache(client, bookcacheredis.DefaultTTL, deps.Logger), client, nil
 }
 
 // buildCloser composes a Close function that stops the saga consumer first,

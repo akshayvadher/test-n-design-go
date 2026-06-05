@@ -1,7 +1,7 @@
 // auto_loan_on_return_test.go ports the saga consumer scenarios from
 // apps/library/src/lending/auto-loan-on-return.consumer.spec.ts. The file
 // combines Slice 1 (behavioural scenarios) and Slice 2 (atomicity
-// invariants — claim-tx rollback, un-fulfil-tx rollback, AutoLoanFailed
+// invariants — claim-tx rollback, un-fulfil-tx rollback, lending.AutoLoanFailed
 // outside any tx, per-book serialisation) in a single file. Stdlib testing
 // only — no testify, no mock library. Spec-local decorators
 // (throwingOnceSaveLoanRepository, throwingOnceSaveReservationRepository)
@@ -14,7 +14,7 @@
 // after seed-time: arming the failure on that call makes the consumer's
 // Borrow return an error — exactly the way the source TS catch-block
 // observes it.
-package lending
+package lending_test
 
 import (
 	"bytes"
@@ -26,9 +26,15 @@ import (
 	"testing"
 
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
+	"github.com/akshayvadher/test-n-design-go/internal/lending"
+	lendingmemory "github.com/akshayvadher/test-n-design-go/internal/lending/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/tx"
+	txmemory "github.com/akshayvadher/test-n-design-go/internal/shared/tx/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -42,14 +48,14 @@ import (
 type consumerScene struct {
 	t            *testing.T
 	ctx          context.Context
-	facade       *Facade
-	consumer     *AutoLoanOnReturnConsumer
+	facade       *lending.Facade
+	consumer     *lending.AutoLoanOnReturnConsumer
 	catalog      *catalog.Facade
 	membership   *membership.Facade
-	bus          *events.InMemoryEventBus
-	loans        LoanRepository
-	loansMem     *InMemoryLoanRepository
-	reservations ReservationRepository
+	bus          *eventsmemory.Bus
+	loans        lending.LoanRepository
+	loansMem     *lendingmemory.LoanRepository
+	reservations lending.ReservationRepository
 	collected    *collectedEvents
 	logBuf       *bytes.Buffer
 }
@@ -60,10 +66,10 @@ type consumerSceneOpts struct {
 	// Loans swaps the shared loan repo. nil means a fresh
 	// InMemoryLoanRepository. Tests that need to arm a borrow failure pass
 	// a throwingOnceLoanRepository here.
-	Loans LoanRepository
+	Loans lending.LoanRepository
 	// Reservations swaps the shared reservation repo. nil means a fresh
 	// InMemoryReservationRepository.
-	Reservations ReservationRepository
+	Reservations lending.ReservationRepository
 }
 
 // buildConsumerScene wires the full saga scene. The lending facade and the
@@ -75,32 +81,32 @@ func buildConsumerScene(t *testing.T, opts consumerSceneOpts) *consumerScene {
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{
+	catalogFacade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:  sequentialIds("cat"),
 		Logger: logger,
 	})
-	membershipFacade := membership.NewFacadeWithOverrides(membership.Overrides{
+	membershipFacade := membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{
 		NewID:  sequentialIds("mem"),
 		Logger: logger,
 	})
 
-	var loansRepo LoanRepository = opts.Loans
-	var loansMem *InMemoryLoanRepository
+	var loansRepo lending.LoanRepository = opts.Loans
+	var loansMem *lendingmemory.LoanRepository
 	if loansRepo == nil {
-		loansMem = NewInMemoryLoanRepository()
+		loansMem = lendingmemory.NewLoanRepository()
 		loansRepo = loansMem
 	}
-	var reservationsRepo ReservationRepository = opts.Reservations
+	var reservationsRepo lending.ReservationRepository = opts.Reservations
 	if reservationsRepo == nil {
-		reservationsRepo = NewInMemoryReservationRepository()
+		reservationsRepo = lendingmemory.NewReservationRepository()
 	}
 
-	bus := events.NewInMemoryEventBus(logger)
+	bus := eventsmemory.NewBus(logger)
 	txFactory := func() tx.TransactionalContext {
-		return tx.NewInMemoryTransactionalContext(bus, logger)
+		return txmemory.NewTransactionalContext(bus, logger)
 	}
 
-	facade := NewFacadeWithOverrides(Overrides{
+	facade := lendingmemory.NewFacadeWithOverrides(lendingmemory.Overrides{
 		Catalog:      catalogFacade,
 		Membership:   membershipFacade,
 		Loans:        loansRepo,
@@ -112,7 +118,7 @@ func buildConsumerScene(t *testing.T, opts consumerSceneOpts) *consumerScene {
 		Logger:       logger,
 	})
 
-	consumer := NewAutoLoanOnReturnConsumer(AutoLoanOnReturnConsumerDeps{
+	consumer := lending.NewAutoLoanOnReturnConsumer(lending.AutoLoanOnReturnConsumerDeps{
 		Bus:          bus,
 		Membership:   membershipFacade,
 		Reservations: reservationsRepo,
@@ -212,7 +218,7 @@ func requireEventTypes(t *testing.T, collected *collectedEvents, want []string) 
 	}
 }
 
-func findReservation(t *testing.T, repo ReservationRepository, id ReservationId) ReservationDto {
+func findReservation(t *testing.T, repo lending.ReservationRepository, id lending.ReservationId) lending.ReservationDto {
 	t.Helper()
 	res, err := repo.FindReservationById(context.Background(), id)
 	if err != nil {
@@ -226,7 +232,7 @@ func findReservation(t *testing.T, repo ReservationRepository, id ReservationId)
 
 // loansFor returns the loans for memberId. Works regardless of whether the
 // scene's loan repo is the throwing decorator or the bare InMemoryLoanRepository.
-func loansFor(t *testing.T, s *consumerScene, memberId membership.MemberId) []LoanDto {
+func loansFor(t *testing.T, s *consumerScene, memberId membership.MemberId) []lending.LoanDto {
 	t.Helper()
 	loans, err := s.loans.ListLoansForMember(s.ctx, memberId)
 	if err != nil {
@@ -414,7 +420,7 @@ func TestAutoLoanConsumer_AllIneligibleNoOp(t *testing.T) {
 			t.Errorf("member %q loans: got %d, want 0", m, len(got))
 		}
 	}
-	for _, id := range []ReservationId{resOne.ReservationId, resTwo.ReservationId} {
+	for _, id := range []lending.ReservationId{resOne.ReservationId, resTwo.ReservationId} {
 		res := findReservation(t, s.reservations, id)
 		if res.FulfilledAt != nil {
 			t.Errorf("res %q FulfilledAt: got %v, want nil", id, *res.FulfilledAt)
@@ -448,7 +454,7 @@ func TestAutoLoanConsumer_StartTwiceIsIdempotent(t *testing.T) {
 	_, _ = s.facade.ReturnLoan(s.ctx, aliceLoan.LoanId)
 
 	if got := countType(s.collected.types(), "AutoLoanOpened"); got != 1 {
-		t.Errorf("AutoLoanOpened count: got %d, want 1 (Start is idempotent)", got)
+		t.Errorf("lending.AutoLoanOpened count: got %d, want 1 (Start is idempotent)", got)
 	}
 }
 
@@ -493,7 +499,7 @@ func TestAutoLoanConsumer_StartAfterStopRebinds(t *testing.T) {
 	_, _ = s.facade.ReturnLoan(s.ctx, aliceLoan.LoanId)
 
 	if got := countType(s.collected.types(), "AutoLoanOpened"); got != 1 {
-		t.Errorf("AutoLoanOpened count after re-Start: got %d, want 1", got)
+		t.Errorf("lending.AutoLoanOpened count after re-Start: got %d, want 1", got)
 	}
 }
 
@@ -512,24 +518,24 @@ func TestAutoLoanConsumer_AutoLoanOpenedPayload(t *testing.T) {
 	if len(bobLoans) != 1 {
 		t.Fatalf("bob loans: got %d, want 1", len(bobLoans))
 	}
-	opened, ok := firstByType[AutoLoanOpened](s.collected.snapshot())
+	opened, ok := firstByType[lending.AutoLoanOpened](s.collected.snapshot())
 	if !ok {
-		t.Fatalf("AutoLoanOpened not published")
+		t.Fatalf("lending.AutoLoanOpened not published")
 	}
 	if opened.BookId != copyDto.BookId {
-		t.Errorf("AutoLoanOpened.BookId: got %q, want %q", opened.BookId, copyDto.BookId)
+		t.Errorf("lending.AutoLoanOpened.BookId: got %q, want %q", opened.BookId, copyDto.BookId)
 	}
 	if opened.LoanId != bobLoans[0].LoanId {
-		t.Errorf("AutoLoanOpened.LoanId: got %q, want %q", opened.LoanId, bobLoans[0].LoanId)
+		t.Errorf("lending.AutoLoanOpened.LoanId: got %q, want %q", opened.LoanId, bobLoans[0].LoanId)
 	}
 	if opened.MemberId != bob.MemberId {
-		t.Errorf("AutoLoanOpened.MemberId: got %q, want %q", opened.MemberId, bob.MemberId)
+		t.Errorf("lending.AutoLoanOpened.MemberId: got %q, want %q", opened.MemberId, bob.MemberId)
 	}
 	if opened.ReservationId != bobReservation.ReservationId {
-		t.Errorf("AutoLoanOpened.ReservationId: got %q, want %q", opened.ReservationId, bobReservation.ReservationId)
+		t.Errorf("lending.AutoLoanOpened.ReservationId: got %q, want %q", opened.ReservationId, bobReservation.ReservationId)
 	}
 	if !opened.OpenedAt.Equal(fixedNow) {
-		t.Errorf("AutoLoanOpened.OpenedAt: got %v, want %v", opened.OpenedAt, fixedNow)
+		t.Errorf("lending.AutoLoanOpened.OpenedAt: got %v, want %v", opened.OpenedAt, fixedNow)
 	}
 }
 
@@ -539,7 +545,7 @@ func TestAutoLoanConsumer_AutoLoanOpenedPayload(t *testing.T) {
 
 // TestAutoLoanConsumer_BorrowFailureTriggersUnfulfilAndAutoLoanFailed verifies
 // the consumer's failure path: when Borrow throws, the claim is rolled back
-// via the un-fulfil tx and AutoLoanFailed publishes with the borrow error
+// via the un-fulfil tx and lending.AutoLoanFailed publishes with the borrow error
 // message.
 //
 // Failure injection: arm the SHARED loans repo to fail on the NEXT SaveLoan.
@@ -576,11 +582,11 @@ func TestAutoLoanConsumer_BorrowFailureTriggersUnfulfilAndAutoLoanFailed(t *test
 		"AutoLoanFailed",
 	})
 
-	failed, _ := firstByType[AutoLoanFailed](s.collected.snapshot())
+	failed, _ := firstByType[lending.AutoLoanFailed](s.collected.snapshot())
 	// The borrow failure wraps the armed error via tx.Run ("tx work: ...").
-	// We assert the AutoLoanFailed.Reason contains the armed error message.
+	// We assert the lending.AutoLoanFailed.Reason contains the armed error message.
 	if !bytes.Contains([]byte(failed.Reason), []byte(armed.Error())) {
-		t.Errorf("AutoLoanFailed.Reason: got %q, want substring %q", failed.Reason, armed.Error())
+		t.Errorf("lending.AutoLoanFailed.Reason: got %q, want substring %q", failed.Reason, armed.Error())
 	}
 }
 
@@ -590,7 +596,7 @@ func TestAutoLoanConsumer_BorrowFailureTriggersUnfulfilAndAutoLoanFailed(t *test
 
 // TestAutoLoanConsumer_ClaimTxRollbackSuppressesReservationFulfilled is the
 // FIRST canonical atomicity AC: when the claim-tx errors, the staged
-// ReservationFulfilled event is suppressed (because tx rollback discards
+// lending.ReservationFulfilled event is suppressed (because tx rollback discards
 // staged events).
 //
 // Bob's Reserve = save call #1; the consumer's claim = save call #2.
@@ -621,16 +627,16 @@ func TestAutoLoanConsumer_ClaimTxRollbackSuppressesReservationFulfilled(t *testi
 
 	types := s.collected.types()
 	if !containsString(types, "LoanReturned") {
-		t.Errorf("events: want LoanReturned in %v", types)
+		t.Errorf("events: want lending.LoanReturned in %v", types)
 	}
 	if containsString(types, "ReservationFulfilled") {
-		t.Errorf("events: did NOT want ReservationFulfilled in %v (claim tx rolled back)", types)
+		t.Errorf("events: did NOT want lending.ReservationFulfilled in %v (claim tx rolled back)", types)
 	}
 	if containsString(types, "LoanOpened") {
-		t.Errorf("events: did NOT want LoanOpened in %v (no borrow attempted)", types)
+		t.Errorf("events: did NOT want lending.LoanOpened in %v (no borrow attempted)", types)
 	}
 	if containsString(types, "AutoLoanOpened") {
-		t.Errorf("events: did NOT want AutoLoanOpened in %v", types)
+		t.Errorf("events: did NOT want lending.AutoLoanOpened in %v", types)
 	}
 
 	if !bytes.Contains(s.logBuf.Bytes(), []byte("claim reservation failed")) {
@@ -639,7 +645,7 @@ func TestAutoLoanConsumer_ClaimTxRollbackSuppressesReservationFulfilled(t *testi
 }
 
 // TestAutoLoanConsumer_UnfulfilTxRollbackSuppressesReservationUnfulfilled is
-// the SECOND canonical atomicity AC: un-fulfil tx errors, ReservationUnfulfilled
+// the SECOND canonical atomicity AC: un-fulfil tx errors, lending.ReservationUnfulfilled
 // suppressed, but the prior claim stays committed.
 //
 // Bob's Reserve = #1; claim = #2; un-fulfil = #3.
@@ -672,15 +678,15 @@ func TestAutoLoanConsumer_UnfulfilTxRollbackSuppressesReservationUnfulfilled(t *
 
 	types := s.collected.types()
 	if !containsString(types, "ReservationFulfilled") {
-		t.Errorf("events: want ReservationFulfilled in %v", types)
+		t.Errorf("events: want lending.ReservationFulfilled in %v", types)
 	}
 	if containsString(types, "ReservationUnfulfilled") {
-		t.Errorf("events: did NOT want ReservationUnfulfilled in %v (un-fulfil tx rolled back)", types)
+		t.Errorf("events: did NOT want lending.ReservationUnfulfilled in %v (un-fulfil tx rolled back)", types)
 	}
 }
 
 // TestAutoLoanConsumer_AutoLoanFailedFiresOutsideUnfulfilTx is the THIRD
-// canonical atomicity AC: AutoLoanFailed publishes OUTSIDE the un-fulfil
+// canonical atomicity AC: lending.AutoLoanFailed publishes OUTSIDE the un-fulfil
 // tx, so it lands on the bus even when the un-fulfil tx rolled back. The
 // Reason payload reflects the ORIGINAL borrow error, not the un-fulfil error.
 func TestAutoLoanConsumer_AutoLoanFailedFiresOutsideUnfulfilTx(t *testing.T) {
@@ -709,9 +715,9 @@ func TestAutoLoanConsumer_AutoLoanFailedFiresOutsideUnfulfilTx(t *testing.T) {
 		"AutoLoanFailed",
 	})
 
-	failed, _ := firstByType[AutoLoanFailed](s.collected.snapshot())
+	failed, _ := firstByType[lending.AutoLoanFailed](s.collected.snapshot())
 	if !bytes.Contains([]byte(failed.Reason), []byte(borrowErr.Error())) {
-		t.Errorf("AutoLoanFailed.Reason: got %q, want substring %q (NOT the un-fulfil error %q)",
+		t.Errorf("lending.AutoLoanFailed.Reason: got %q, want substring %q (NOT the un-fulfil error %q)",
 			failed.Reason, borrowErr.Error(), unfulfilArmed.Error())
 	}
 }
@@ -762,16 +768,16 @@ func TestAutoLoanConsumer_PerBookMutexPreventsDoubleFulfilment(t *testing.T) {
 
 	types := s.collected.types()
 	if countType(types, "LoanReturned") != 2 {
-		t.Errorf("LoanReturned count: got %d, want 2", countType(types, "LoanReturned"))
+		t.Errorf("lending.LoanReturned count: got %d, want 2", countType(types, "LoanReturned"))
 	}
 	if countType(types, "ReservationFulfilled") != 1 {
-		t.Errorf("ReservationFulfilled count: got %d, want 1 (per-book mutex)", countType(types, "ReservationFulfilled"))
+		t.Errorf("lending.ReservationFulfilled count: got %d, want 1 (per-book mutex)", countType(types, "ReservationFulfilled"))
 	}
 	if countType(types, "LoanOpened") != 1 {
-		t.Errorf("LoanOpened count: got %d, want 1", countType(types, "LoanOpened"))
+		t.Errorf("lending.LoanOpened count: got %d, want 1", countType(types, "LoanOpened"))
 	}
 	if countType(types, "AutoLoanOpened") != 1 {
-		t.Errorf("AutoLoanOpened count: got %d, want 1", countType(types, "AutoLoanOpened"))
+		t.Errorf("lending.AutoLoanOpened count: got %d, want 1", countType(types, "AutoLoanOpened"))
 	}
 }
 
@@ -809,7 +815,7 @@ func TestAutoLoanConsumer_DifferentBooksRunInParallel(t *testing.T) {
 	}
 
 	if got := countType(s.collected.types(), "AutoLoanOpened"); got != 2 {
-		t.Errorf("AutoLoanOpened count: got %d, want 2", got)
+		t.Errorf("lending.AutoLoanOpened count: got %d, want 2", got)
 	}
 }
 
@@ -859,7 +865,7 @@ func firstByType[T events.DomainEvent](snap []events.DomainEvent) (T, bool) {
 // the test having to manage timing between Alice's return-tx and the bus
 // fanout.
 type throwingOnceSaveLoanRepository struct {
-	delegate     *InMemoryLoanRepository
+	delegate     *lendingmemory.LoanRepository
 	mu           sync.Mutex
 	saveCount    int
 	failOnCallNo int
@@ -869,13 +875,13 @@ type throwingOnceSaveLoanRepository struct {
 
 func newThrowingOnceSaveLoanRepository(failOnCallNo int, err error) *throwingOnceSaveLoanRepository {
 	return &throwingOnceSaveLoanRepository{
-		delegate:     NewInMemoryLoanRepository(),
+		delegate:     lendingmemory.NewLoanRepository(),
 		failOnCallNo: failOnCallNo,
 		armedErr:     err,
 	}
 }
 
-func (r *throwingOnceSaveLoanRepository) SaveLoan(ctx context.Context, loan LoanDto, txc tx.TransactionalContext) error {
+func (r *throwingOnceSaveLoanRepository) SaveLoan(ctx context.Context, loan lending.LoanDto, txc tx.TransactionalContext) error {
 	r.mu.Lock()
 	r.saveCount++
 	shouldFire := !r.fired && r.saveCount == r.failOnCallNo
@@ -889,19 +895,19 @@ func (r *throwingOnceSaveLoanRepository) SaveLoan(ctx context.Context, loan Loan
 	return r.delegate.SaveLoan(ctx, loan, txc)
 }
 
-func (r *throwingOnceSaveLoanRepository) FindLoanById(ctx context.Context, loanId LoanId) (*LoanDto, error) {
+func (r *throwingOnceSaveLoanRepository) FindLoanById(ctx context.Context, loanId lending.LoanId) (*lending.LoanDto, error) {
 	return r.delegate.FindLoanById(ctx, loanId)
 }
 
-func (r *throwingOnceSaveLoanRepository) ListLoansForMember(ctx context.Context, memberId membership.MemberId) ([]LoanDto, error) {
+func (r *throwingOnceSaveLoanRepository) ListLoansForMember(ctx context.Context, memberId membership.MemberId) ([]lending.LoanDto, error) {
 	return r.delegate.ListLoansForMember(ctx, memberId)
 }
 
-func (r *throwingOnceSaveLoanRepository) ListLoansForBook(ctx context.Context, bookId catalog.BookId) ([]LoanDto, error) {
+func (r *throwingOnceSaveLoanRepository) ListLoansForBook(ctx context.Context, bookId catalog.BookId) ([]lending.LoanDto, error) {
 	return r.delegate.ListLoansForBook(ctx, bookId)
 }
 
-func (r *throwingOnceSaveLoanRepository) ListLoans(ctx context.Context) ([]LoanDto, error) {
+func (r *throwingOnceSaveLoanRepository) ListLoans(ctx context.Context) ([]lending.LoanDto, error) {
 	return r.delegate.ListLoans(ctx)
 }
 
@@ -913,7 +919,7 @@ func (r *throwingOnceSaveLoanRepository) ListLoans(ctx context.Context) ([]LoanD
 // a specific saga step: the consumer's claim is the 2nd save (after Bob's
 // Reserve = #1); the consumer's un-fulfil is the 3rd save.
 type throwingOnceSaveReservationRepository struct {
-	delegate     *InMemoryReservationRepository
+	delegate     *lendingmemory.ReservationRepository
 	mu           sync.Mutex
 	saveCount    int
 	failOnCallNo int
@@ -923,13 +929,13 @@ type throwingOnceSaveReservationRepository struct {
 
 func newThrowingOnceSaveReservationRepository(failOnCallNo int, err error) *throwingOnceSaveReservationRepository {
 	return &throwingOnceSaveReservationRepository{
-		delegate:     NewInMemoryReservationRepository(),
+		delegate:     lendingmemory.NewReservationRepository(),
 		failOnCallNo: failOnCallNo,
 		armedErr:     err,
 	}
 }
 
-func (r *throwingOnceSaveReservationRepository) SaveReservation(ctx context.Context, reservation ReservationDto, txc tx.TransactionalContext) error {
+func (r *throwingOnceSaveReservationRepository) SaveReservation(ctx context.Context, reservation lending.ReservationDto, txc tx.TransactionalContext) error {
 	r.mu.Lock()
 	r.saveCount++
 	shouldFire := !r.fired && r.saveCount == r.failOnCallNo
@@ -943,15 +949,15 @@ func (r *throwingOnceSaveReservationRepository) SaveReservation(ctx context.Cont
 	return r.delegate.SaveReservation(ctx, reservation, txc)
 }
 
-func (r *throwingOnceSaveReservationRepository) FindReservationById(ctx context.Context, reservationId ReservationId) (*ReservationDto, error) {
+func (r *throwingOnceSaveReservationRepository) FindReservationById(ctx context.Context, reservationId lending.ReservationId) (*lending.ReservationDto, error) {
 	return r.delegate.FindReservationById(ctx, reservationId)
 }
 
-func (r *throwingOnceSaveReservationRepository) ListReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error) {
+func (r *throwingOnceSaveReservationRepository) ListReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]lending.ReservationDto, error) {
 	return r.delegate.ListReservationsForBook(ctx, bookId)
 }
 
-func (r *throwingOnceSaveReservationRepository) ListReservationsForMember(ctx context.Context, memberId membership.MemberId) ([]ReservationDto, error) {
+func (r *throwingOnceSaveReservationRepository) ListReservationsForMember(ctx context.Context, memberId membership.MemberId) ([]lending.ReservationDto, error) {
 	return r.delegate.ListReservationsForMember(ctx, memberId)
 }
 
@@ -959,6 +965,6 @@ func (r *throwingOnceSaveReservationRepository) PendingReservationCountForBook(c
 	return r.delegate.PendingReservationCountForBook(ctx, bookId)
 }
 
-func (r *throwingOnceSaveReservationRepository) ListPendingReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]ReservationDto, error) {
+func (r *throwingOnceSaveReservationRepository) ListPendingReservationsForBook(ctx context.Context, bookId catalog.BookId) ([]lending.ReservationDto, error) {
 	return r.delegate.ListPendingReservationsForBook(ctx, bookId)
 }

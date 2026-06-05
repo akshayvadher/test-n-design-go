@@ -3,16 +3,19 @@
 // repository, scoped to the methods Phase 2 ships (no thumbnail / file-storage
 // scenarios; those are deferred to Phase 5).
 //
-// The file lives in package catalog so it can reach unexported helpers via the
-// recordingRepository decorator without exporting test-only code from the
-// production barrel. Stdlib testing only — t.Run for nested describe blocks,
-// errors.As for typed-error assertions, no testify, no mock library.
+// Lives in package catalog_test (external test package) so it can import
+// the in-memory adapter from internal/catalog/driven/memory without
+// creating an import cycle. Every symbol is qualified with the catalog.*
+// prefix.
+//
+// Stdlib testing only — t.Run for nested describe blocks, errors.As for
+// typed-error assertions, no testify, no mock library.
 //
 // Spec-local decorators (throwingOnceIsbnLookupGateway, throwingOnceBookCacheGateway,
 // recordingRepository) live at the bottom of the file. They mirror the
 // equivalent TS classes; their existence here — not in any other package —
 // is the proof that fault-injection state never leaks into production.
-package catalog
+package catalog_test
 
 import (
 	"context"
@@ -20,8 +23,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/bookcache"
+	bookcachememory "github.com/akshayvadher/test-n-design-go/internal/shared/bookcache/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway"
+	isbngatewaymemory "github.com/akshayvadher/test-n-design-go/internal/shared/isbngateway/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -29,7 +36,7 @@ import (
 // -----------------------------------------------------------------------------
 
 // sequentialIds returns a deterministic id generator over a closed counter so
-// minted BookId / CopyId values are predictable in assertions. Default prefix
+// minted catalog.BookId / catalog.CopyId values are predictable in assertions. Default prefix
 // is "id". Mirrors the TS source's sequentialIds.
 func sequentialIds(prefix string) func() string {
 	if prefix == "" {
@@ -64,36 +71,36 @@ func itoa(n int) string {
 	return string(digits)
 }
 
-// buildFacade constructs a Facade with deterministic ids and the default
+// buildFacade constructs a catalog.Facade with deterministic ids and the default
 // in-memory substrates from configuration.go. Mirrors the TS buildFacade.
-func buildFacade(t *testing.T) *Facade {
+func buildFacade(t *testing.T) *catalog.Facade {
 	t.Helper()
-	return NewFacadeWithOverrides(Overrides{NewID: sequentialIds("id")})
+	return catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{NewID: sequentialIds("id")})
 }
 
-// buildFacadeWithGateway constructs a Facade wired to a seeded in-memory
+// buildFacadeWithGateway constructs a catalog.Facade wired to a seeded in-memory
 // IsbnLookupGateway. Mirrors the TS buildFacadeWithGateway. The returned
 // gateway pointer lets callers seed further entries inside a test.
-func buildFacadeWithGateway(t *testing.T, seed map[string]isbngateway.BookMetadata) (*Facade, *isbngateway.InMemoryIsbnLookupGateway) {
+func buildFacadeWithGateway(t *testing.T, seed map[string]isbngateway.BookMetadata) (*catalog.Facade, *isbngatewaymemory.Gateway) {
 	t.Helper()
-	gateway := isbngateway.NewInMemoryIsbnLookupGateway()
+	gateway := isbngatewaymemory.NewGateway()
 	for isbn, metadata := range seed {
 		gateway.Seed(isbn, metadata)
 	}
-	facade := NewFacadeWithOverrides(Overrides{
+	facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:             sequentialIds("book"),
 		IsbnLookupGateway: gateway,
 	})
 	return facade, gateway
 }
 
-// buildCacheScene constructs a Facade with a fresh in-memory cache. The cache
+// buildCacheScene constructs a catalog.Facade with a fresh in-memory cache. The cache
 // pointer lets callers seed entries directly and assert post-conditions.
 // Mirrors the TS buildScene used across the cache / update / delete blocks.
-func buildCacheScene(t *testing.T) (*bookcache.InMemoryBookCacheGateway, *Facade) {
+func buildCacheScene(t *testing.T) (*bookcachememory.Cache, *catalog.Facade) {
 	t.Helper()
-	cache := bookcache.NewInMemoryBookCacheGateway()
-	facade := NewFacadeWithOverrides(Overrides{
+	cache := bookcachememory.NewCache()
+	facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:            sequentialIds("book"),
 		BookCacheGateway: cache,
 	})
@@ -102,7 +109,7 @@ func buildCacheScene(t *testing.T) (*bookcache.InMemoryBookCacheGateway, *Facade
 
 // mustAddBook is a tiny helper for arrange-phase calls where a t.Fatalf on
 // failure is cleaner than a four-line err check. Test-only.
-func mustAddBook(t *testing.T, facade *Facade, dto NewBookDto) BookDto {
+func mustAddBook(t *testing.T, facade *catalog.Facade, dto catalog.NewBookDto) catalog.BookDto {
 	t.Helper()
 	book, err := facade.AddBook(context.Background(), dto)
 	if err != nil {
@@ -112,7 +119,7 @@ func mustAddBook(t *testing.T, facade *Facade, dto NewBookDto) BookDto {
 }
 
 // mustRegisterCopy mirrors mustAddBook for the copy lifecycle scenarios.
-func mustRegisterCopy(t *testing.T, facade *Facade, bookId BookId, dto NewCopyDto) CopyDto {
+func mustRegisterCopy(t *testing.T, facade *catalog.Facade, bookId catalog.BookId, dto catalog.NewCopyDto) catalog.CopyDto {
 	t.Helper()
 	copy, err := facade.RegisterCopy(context.Background(), bookId, dto)
 	if err != nil {
@@ -121,56 +128,56 @@ func mustRegisterCopy(t *testing.T, facade *Facade, bookId BookId, dto NewCopyDt
 	return copy
 }
 
-// assertInvalidBook fails the test if err is not *InvalidBookError.
+// assertInvalidBook fails the test if err is not *catalog.InvalidBookError.
 // (Renamed from assertInvalidBookError to avoid collision with the
 // reason-substring helper in schema_test.go.)
 func assertInvalidBook(t *testing.T, err error) {
 	t.Helper()
-	var target *InvalidBookError
+	var target *catalog.InvalidBookError
 	if !errors.As(err, &target) {
-		t.Fatalf("expected *InvalidBookError, got %T (%v)", err, err)
+		t.Fatalf("expected *catalog.InvalidBookError, got %T (%v)", err, err)
 	}
 }
 
-// assertBookNotFound fails the test if err is not *BookNotFoundError.
+// assertBookNotFound fails the test if err is not *catalog.BookNotFoundError.
 func assertBookNotFound(t *testing.T, err error) {
 	t.Helper()
-	var target *BookNotFoundError
+	var target *catalog.BookNotFoundError
 	if !errors.As(err, &target) {
-		t.Fatalf("expected *BookNotFoundError, got %T (%v)", err, err)
+		t.Fatalf("expected *catalog.BookNotFoundError, got %T (%v)", err, err)
 	}
 }
 
-// assertCopyNotFound fails the test if err is not *CopyNotFoundError.
+// assertCopyNotFound fails the test if err is not *catalog.CopyNotFoundError.
 func assertCopyNotFound(t *testing.T, err error) {
 	t.Helper()
-	var target *CopyNotFoundError
+	var target *catalog.CopyNotFoundError
 	if !errors.As(err, &target) {
-		t.Fatalf("expected *CopyNotFoundError, got %T (%v)", err, err)
+		t.Fatalf("expected *catalog.CopyNotFoundError, got %T (%v)", err, err)
 	}
 }
 
-// assertDuplicateIsbn fails the test if err is not *DuplicateIsbnError.
+// assertDuplicateIsbn fails the test if err is not *catalog.DuplicateIsbnError.
 func assertDuplicateIsbn(t *testing.T, err error) {
 	t.Helper()
-	var target *DuplicateIsbnError
+	var target *catalog.DuplicateIsbnError
 	if !errors.As(err, &target) {
-		t.Fatalf("expected *DuplicateIsbnError, got %T (%v)", err, err)
+		t.Fatalf("expected *catalog.DuplicateIsbnError, got %T (%v)", err, err)
 	}
 }
 
-// assertInvalidCopy fails the test if err is not *InvalidCopyError.
+// assertInvalidCopy fails the test if err is not *catalog.InvalidCopyError.
 func assertInvalidCopy(t *testing.T, err error) {
 	t.Helper()
-	var target *InvalidCopyError
+	var target *catalog.InvalidCopyError
 	if !errors.As(err, &target) {
-		t.Fatalf("expected *InvalidCopyError, got %T (%v)", err, err)
+		t.Fatalf("expected *catalog.InvalidCopyError, got %T (%v)", err, err)
 	}
 }
 
 // cacheBookDto returns the wire shape the catalog facade stores in the cache
-// for a given domain BookDto. Used by tests that seed the cache directly.
-func cacheBookDto(book BookDto) bookcache.BookDto {
+// for a given domain catalog.BookDto. Used by tests that seed the cache directly.
+func cacheBookDto(book catalog.BookDto) bookcache.BookDto {
 	return bookcache.BookDto{
 		BookId:  string(book.BookId),
 		Title:   book.Title,
@@ -189,7 +196,7 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 	t.Run("adds a book and finds it by isbn", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		added, err := facade.AddBook(ctx, SampleNewBook(WithIsbn("978-0134685991")))
+		added, err := facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithIsbn("978-0134685991")))
 		if err != nil {
 			t.Fatalf("AddBook failed: %v", err)
 		}
@@ -205,14 +212,14 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 
 	t.Run("lists all books in the order they were added", func(t *testing.T) {
 		facade := buildFacade(t)
-		first := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
-		second := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0135957059"))
+		first := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
+		second := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0135957059"))
 
 		books, err := facade.ListBooks(ctx)
 		if err != nil {
 			t.Fatalf("ListBooks failed: %v", err)
 		}
-		want := []BookDto{first, second}
+		want := []catalog.BookDto{first, second}
 		if !reflect.DeepEqual(books, want) {
 			t.Errorf("ListBooks returned %+v, want %+v", books, want)
 		}
@@ -220,8 +227,8 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 
 	t.Run("registers a copy of an existing book and finds the copy", func(t *testing.T) {
 		facade := buildFacade(t)
-		book := mustAddBook(t, facade, SampleNewBook())
-		copy := mustRegisterCopy(t, facade, book.BookId, SampleNewCopy(WithBookId(book.BookId)))
+		book := mustAddBook(t, facade, catalog.SampleNewBook())
+		copy := mustRegisterCopy(t, facade, book.BookId, catalog.SampleNewCopy(catalog.WithBookId(book.BookId)))
 
 		found, err := facade.FindCopy(ctx, copy.CopyId)
 		if err != nil {
@@ -234,19 +241,19 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 
 	t.Run("registers new copies as available by default", func(t *testing.T) {
 		facade := buildFacade(t)
-		book := mustAddBook(t, facade, SampleNewBook())
+		book := mustAddBook(t, facade, catalog.SampleNewBook())
 
-		copy := mustRegisterCopy(t, facade, book.BookId, SampleNewCopy(WithBookId(book.BookId)))
+		copy := mustRegisterCopy(t, facade, book.BookId, catalog.SampleNewCopy(catalog.WithBookId(book.BookId)))
 
-		if copy.Status != CopyStatusAvailable {
-			t.Errorf("new copy status = %s, want %s", copy.Status, CopyStatusAvailable)
+		if copy.Status != catalog.CopyStatusAvailable {
+			t.Errorf("new copy status = %s, want %s", copy.Status, catalog.CopyStatusAvailable)
 		}
 	})
 
 	t.Run("marks an unavailable copy available again", func(t *testing.T) {
 		facade := buildFacade(t)
-		book := mustAddBook(t, facade, SampleNewBook())
-		copy := mustRegisterCopy(t, facade, book.BookId, SampleNewCopy(WithBookId(book.BookId)))
+		book := mustAddBook(t, facade, catalog.SampleNewBook())
+		copy := mustRegisterCopy(t, facade, book.BookId, catalog.SampleNewCopy(catalog.WithBookId(book.BookId)))
 		if _, err := facade.MarkCopyUnavailable(ctx, copy.CopyId); err != nil {
 			t.Fatalf("MarkCopyUnavailable failed: %v", err)
 		}
@@ -255,63 +262,63 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MarkCopyAvailable failed: %v", err)
 		}
-		if updated.Status != CopyStatusAvailable {
-			t.Errorf("returned copy status = %s, want %s", updated.Status, CopyStatusAvailable)
+		if updated.Status != catalog.CopyStatusAvailable {
+			t.Errorf("returned copy status = %s, want %s", updated.Status, catalog.CopyStatusAvailable)
 		}
 
 		fresh, err := facade.FindCopy(ctx, copy.CopyId)
 		if err != nil {
 			t.Fatalf("FindCopy failed: %v", err)
 		}
-		if fresh.Status != CopyStatusAvailable {
-			t.Errorf("FindCopy status = %s, want %s", fresh.Status, CopyStatusAvailable)
+		if fresh.Status != catalog.CopyStatusAvailable {
+			t.Errorf("FindCopy status = %s, want %s", fresh.Status, catalog.CopyStatusAvailable)
 		}
 	})
 
 	t.Run("marks an available copy unavailable", func(t *testing.T) {
 		facade := buildFacade(t)
-		book := mustAddBook(t, facade, SampleNewBook())
-		copy := mustRegisterCopy(t, facade, book.BookId, SampleNewCopy(WithBookId(book.BookId)))
+		book := mustAddBook(t, facade, catalog.SampleNewBook())
+		copy := mustRegisterCopy(t, facade, book.BookId, catalog.SampleNewCopy(catalog.WithBookId(book.BookId)))
 
 		updated, err := facade.MarkCopyUnavailable(ctx, copy.CopyId)
 		if err != nil {
 			t.Fatalf("MarkCopyUnavailable failed: %v", err)
 		}
-		if updated.Status != CopyStatusUnavailable {
-			t.Errorf("returned copy status = %s, want %s", updated.Status, CopyStatusUnavailable)
+		if updated.Status != catalog.CopyStatusUnavailable {
+			t.Errorf("returned copy status = %s, want %s", updated.Status, catalog.CopyStatusUnavailable)
 		}
 
 		fresh, err := facade.FindCopy(ctx, copy.CopyId)
 		if err != nil {
 			t.Fatalf("FindCopy failed: %v", err)
 		}
-		if fresh.Status != CopyStatusUnavailable {
-			t.Errorf("FindCopy status = %s, want %s", fresh.Status, CopyStatusUnavailable)
+		if fresh.Status != catalog.CopyStatusUnavailable {
+			t.Errorf("FindCopy status = %s, want %s", fresh.Status, catalog.CopyStatusUnavailable)
 		}
 	})
 
-	t.Run("returns BookNotFoundError when finding an unknown isbn", func(t *testing.T) {
+	t.Run("returns catalog.BookNotFoundError when finding an unknown isbn", func(t *testing.T) {
 		facade := buildFacade(t)
 
 		_, err := facade.FindBook(ctx, "978-0000000000")
 		assertBookNotFound(t, err)
 	})
 
-	t.Run("returns BookNotFoundError when registering a copy for an unknown book", func(t *testing.T) {
+	t.Run("returns catalog.BookNotFoundError when registering a copy for an unknown book", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.RegisterCopy(ctx, "unknown-book-id", SampleNewCopy(WithBookId("unknown-book-id")))
+		_, err := facade.RegisterCopy(ctx, "unknown-book-id", catalog.SampleNewCopy(catalog.WithBookId("unknown-book-id")))
 		assertBookNotFound(t, err)
 	})
 
-	t.Run("returns CopyNotFoundError when marking an unknown copy available", func(t *testing.T) {
+	t.Run("returns catalog.CopyNotFoundError when marking an unknown copy available", func(t *testing.T) {
 		facade := buildFacade(t)
 
 		_, err := facade.MarkCopyAvailable(ctx, "unknown-copy-id")
 		assertCopyNotFound(t, err)
 	})
 
-	t.Run("returns CopyNotFoundError when marking an unknown copy unavailable", func(t *testing.T) {
+	t.Run("returns catalog.CopyNotFoundError when marking an unknown copy unavailable", func(t *testing.T) {
 		facade := buildFacade(t)
 
 		_, err := facade.MarkCopyUnavailable(ctx, "unknown-copy-id")
@@ -321,48 +328,48 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 	t.Run("rejects adding a book with a blank title", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.AddBook(ctx, SampleNewBook(WithTitle("")))
+		_, err := facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithTitle("")))
 		assertInvalidBook(t, err)
 
-		_, err = facade.AddBook(ctx, SampleNewBook(WithTitle("   ")))
+		_, err = facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithTitle("   ")))
 		assertInvalidBook(t, err)
 	})
 
 	t.Run("rejects adding a book with no authors", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.AddBook(ctx, SampleNewBook(WithAuthors([]string{})))
+		_, err := facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithAuthors([]string{})))
 		assertInvalidBook(t, err)
 
-		_, err = facade.AddBook(ctx, SampleNewBook(WithAuthors([]string{"  "})))
+		_, err = facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithAuthors([]string{"  "})))
 		assertInvalidBook(t, err)
 	})
 
 	t.Run("rejects adding a book with a malformed isbn", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		_, err := facade.AddBook(ctx, SampleNewBook(WithIsbn("")))
+		_, err := facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithIsbn("")))
 		assertInvalidBook(t, err)
 
-		_, err = facade.AddBook(ctx, SampleNewBook(WithIsbn("123")))
+		_, err = facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithIsbn("123")))
 		assertInvalidBook(t, err)
 
-		_, err = facade.AddBook(ctx, SampleNewBook(WithIsbn("not-an-isbn")))
+		_, err = facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithIsbn("not-an-isbn")))
 		assertInvalidBook(t, err)
 	})
 
 	t.Run("accepts well-formed isbn-10 and isbn-13 with or without hyphens", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		isbn13Hyphenated, err := facade.AddBook(ctx, SampleNewBook(WithIsbn("978-0134685991")))
+		isbn13Hyphenated, err := facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithIsbn("978-0134685991")))
 		if err != nil {
 			t.Fatalf("AddBook isbn-13 hyphenated failed: %v", err)
 		}
-		isbn13Plain, err := facade.AddBook(ctx, SampleNewBook(WithIsbn("9780135957059")))
+		isbn13Plain, err := facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithIsbn("9780135957059")))
 		if err != nil {
 			t.Fatalf("AddBook isbn-13 plain failed: %v", err)
 		}
-		isbn10, err := facade.AddBook(ctx, SampleNewBook(WithIsbn("0-306-40615-2")))
+		isbn10, err := facade.AddBook(ctx, catalog.SampleNewBook(catalog.WithIsbn("0-306-40615-2")))
 		if err != nil {
 			t.Fatalf("AddBook isbn-10 hyphenated failed: %v", err)
 		}
@@ -384,7 +391,7 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 	t.Run("trims surrounding whitespace from title authors and isbn on addBook", func(t *testing.T) {
 		facade := buildFacade(t)
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Title:   "  The Pragmatic Programmer  ",
 			Authors: []string{"  Andrew Hunt  ", "  David Thomas  "},
 			Isbn:    "  978-0135957059  ",
@@ -406,20 +413,20 @@ func TestCatalogFacade_BasicCRUD(t *testing.T) {
 
 	t.Run("rejects registering a copy with an invalid condition", func(t *testing.T) {
 		facade := buildFacade(t)
-		book := mustAddBook(t, facade, SampleNewBook())
+		book := mustAddBook(t, facade, catalog.SampleNewBook())
 
-		_, err := facade.RegisterCopy(ctx, book.BookId, NewCopyDto{
+		_, err := facade.RegisterCopy(ctx, book.BookId, catalog.NewCopyDto{
 			BookId:    book.BookId,
-			Condition: CopyCondition("BROKEN"),
+			Condition: catalog.CopyCondition("BROKEN"),
 		})
 		assertInvalidCopy(t, err)
 	})
 
 	t.Run("rejects adding a book with an isbn that already exists", func(t *testing.T) {
 		facade := buildFacade(t)
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		_, err := facade.AddBook(ctx, SampleNewBookWithIsbn("978-0134685991"))
+		_, err := facade.AddBook(ctx, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		assertDuplicateIsbn(t, err)
 	})
 }
@@ -434,10 +441,10 @@ func TestCatalogFacade_GetBooks(t *testing.T) {
 	t.Run("returns empty slice for an empty bookIds slice without throwing", func(t *testing.T) {
 		// seed two books to prove the short-circuit is not "nothing to return"
 		facade := buildFacade(t)
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0135957059"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0135957059"))
 
-		books, err := facade.GetBooks(ctx, []BookId{})
+		books, err := facade.GetBooks(ctx, []catalog.BookId{})
 		if err != nil {
 			t.Fatalf("GetBooks([]) returned err: %v", err)
 		}
@@ -446,12 +453,12 @@ func TestCatalogFacade_GetBooks(t *testing.T) {
 		}
 	})
 
-	t.Run("returns each BookDto whose id matches in any order", func(t *testing.T) {
+	t.Run("returns each catalog.BookDto whose id matches in any order", func(t *testing.T) {
 		facade := buildFacade(t)
-		bookA := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
-		bookB := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0135957059"))
+		bookA := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
+		bookB := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0135957059"))
 
-		books, err := facade.GetBooks(ctx, []BookId{bookA.BookId, bookB.BookId})
+		books, err := facade.GetBooks(ctx, []catalog.BookId{bookA.BookId, bookB.BookId})
 		if err != nil {
 			t.Fatalf("GetBooks returned err: %v", err)
 		}
@@ -465,23 +472,23 @@ func TestCatalogFacade_GetBooks(t *testing.T) {
 
 	t.Run("silently drops ids that do not match any book", func(t *testing.T) {
 		facade := buildFacade(t)
-		bookA := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		bookA := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		books, err := facade.GetBooks(ctx, []BookId{bookA.BookId, "non-existent-id"})
+		books, err := facade.GetBooks(ctx, []catalog.BookId{bookA.BookId, "non-existent-id"})
 		if err != nil {
 			t.Fatalf("GetBooks returned err: %v", err)
 		}
-		if !reflect.DeepEqual(books, []BookDto{bookA}) {
+		if !reflect.DeepEqual(books, []catalog.BookDto{bookA}) {
 			t.Errorf("GetBooks returned %+v, want [%+v]", books, bookA)
 		}
 	})
 
 	t.Run("returns one row per matching book when caller passes duplicate ids", func(t *testing.T) {
 		facade := buildFacade(t)
-		bookA := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
-		bookB := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0135957059"))
+		bookA := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
+		bookB := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0135957059"))
 
-		books, err := facade.GetBooks(ctx, []BookId{bookA.BookId, bookA.BookId, bookB.BookId})
+		books, err := facade.GetBooks(ctx, []catalog.BookId{bookA.BookId, bookA.BookId, bookB.BookId})
 		if err != nil {
 			t.Fatalf("GetBooks returned err: %v", err)
 		}
@@ -495,9 +502,9 @@ func TestCatalogFacade_GetBooks(t *testing.T) {
 
 	t.Run("returns empty slice when none of the given bookIds match", func(t *testing.T) {
 		facade := buildFacade(t)
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		books, err := facade.GetBooks(ctx, []BookId{"ghost-1", "ghost-2"})
+		books, err := facade.GetBooks(ctx, []catalog.BookId{"ghost-1", "ghost-2"})
 		if err != nil {
 			t.Fatalf("GetBooks returned err: %v", err)
 		}
@@ -510,15 +517,15 @@ func TestCatalogFacade_GetBooks(t *testing.T) {
 		// recordingRepository wraps the real in-memory repo and counts
 		// ListBooksByIds invocations. Two seeded books prove the short-circuit
 		// fires irrespective of repo contents.
-		recorder := &recordingRepository{inner: NewInMemoryRepository()}
-		facade := NewFacadeWithOverrides(Overrides{
+		recorder := &recordingRepository{inner: catalogmemory.NewRepository()}
+		facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 			Repository: recorder,
 			NewID:      sequentialIds("id"),
 		})
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0135957059"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0135957059"))
 
-		books, err := facade.GetBooks(ctx, []BookId{})
+		books, err := facade.GetBooks(ctx, []catalog.BookId{})
 		if err != nil {
 			t.Fatalf("GetBooks returned err: %v", err)
 		}
@@ -532,7 +539,7 @@ func TestCatalogFacade_GetBooks(t *testing.T) {
 }
 
 // containsBook reports whether want is present in books (order-insensitive).
-func containsBook(books []BookDto, want BookDto) bool {
+func containsBook(books []catalog.BookDto, want catalog.BookDto) bool {
 	for _, b := range books {
 		if reflect.DeepEqual(b, want) {
 			return true
@@ -553,7 +560,7 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 			"978-0134685991": {Title: "From Gateway", Authors: []string{"Gateway Author"}},
 		})
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
 		})
@@ -573,7 +580,7 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 			"978-0134685991": {Title: "Gateway Title", Authors: []string{"Gateway Author"}},
 		})
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Title:   "Client Title",
 			Authors: []string{},
 			Isbn:    "978-0134685991",
@@ -594,7 +601,7 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 			"978-0134685991": {Title: "Gateway Title", Authors: []string{"Gateway Author"}},
 		})
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Title:   "Client Title",
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
@@ -612,7 +619,7 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 			"978-0134685991": {Title: "Gateway Title", Authors: []string{"Gateway Author"}},
 		})
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Title:   "Client Title",
 			Authors: []string{"Real Client"},
 			Isbn:    "978-0134685991",
@@ -628,7 +635,7 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 	t.Run("succeeds with client data when the gateway returns nil", func(t *testing.T) {
 		facade, _ := buildFacadeWithGateway(t, nil)
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Title:   "Client Title",
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
@@ -644,20 +651,20 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 		}
 	})
 
-	t.Run("fails with InvalidBookError when the title is missing on both sides", func(t *testing.T) {
+	t.Run("fails with catalog.InvalidBookError when the title is missing on both sides", func(t *testing.T) {
 		facade, _ := buildFacadeWithGateway(t, nil)
 
-		_, err := facade.AddBook(ctx, NewBookDto{
+		_, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
 		})
 		assertInvalidBook(t, err)
 	})
 
-	t.Run("fails with InvalidBookError when title and authors are missing on both sides", func(t *testing.T) {
+	t.Run("fails with catalog.InvalidBookError when title and authors are missing on both sides", func(t *testing.T) {
 		facade, _ := buildFacadeWithGateway(t, nil)
 
-		_, err := facade.AddBook(ctx, NewBookDto{Isbn: "978-0134685991"})
+		_, err := facade.AddBook(ctx, catalog.NewBookDto{Isbn: "978-0134685991"})
 		assertInvalidBook(t, err)
 	})
 
@@ -665,9 +672,9 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 		facade, _ := buildFacadeWithGateway(t, map[string]isbngateway.BookMetadata{
 			"978-0134685991": {Title: "Gateway Title", Authors: []string{"Gateway Author"}},
 		})
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		_, err := facade.AddBook(ctx, NewBookDto{Isbn: "978-0134685991"})
+		_, err := facade.AddBook(ctx, catalog.NewBookDto{Isbn: "978-0134685991"})
 		assertDuplicateIsbn(t, err)
 	})
 
@@ -676,7 +683,7 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 			"978-0134685991": {Title: "Gateway Title", Authors: []string{"Gateway Author"}},
 		})
 
-		book, err := facade.AddBook(ctx, NewBookDto{Isbn: "978-0134685991"})
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{Isbn: "978-0134685991"})
 		if err != nil {
 			t.Fatalf("AddBook failed: %v", err)
 		}
@@ -689,25 +696,25 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 	})
 
 	t.Run("defaults to a fresh InMemoryIsbnLookupGateway when no override is supplied", func(t *testing.T) {
-		facade := NewFacadeWithOverrides(Overrides{NewID: sequentialIds("book")})
+		facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{NewID: sequentialIds("book")})
 
-		_, err := facade.AddBook(ctx, NewBookDto{Isbn: "978-0134685991"})
+		_, err := facade.AddBook(ctx, catalog.NewBookDto{Isbn: "978-0134685991"})
 		assertInvalidBook(t, err)
 	})
 
-	t.Run("returns a BookDto that reflects the merged persisted shape", func(t *testing.T) {
+	t.Run("returns a catalog.BookDto that reflects the merged persisted shape", func(t *testing.T) {
 		facade, _ := buildFacadeWithGateway(t, map[string]isbngateway.BookMetadata{
 			"978-0134685991": {Title: "Gateway Title", Authors: []string{"Gateway Author"}},
 		})
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
 		})
 		if err != nil {
 			t.Fatalf("AddBook failed: %v", err)
 		}
-		want := BookDto{
+		want := catalog.BookDto{
 			BookId:  book.BookId,
 			Title:   "Gateway Title",
 			Authors: []string{"Client Author"},
@@ -733,14 +740,14 @@ func TestCatalogFacade_AddBook_IsbnEnrichment(t *testing.T) {
 func TestCatalogFacade_AddBook_GatewayFailures(t *testing.T) {
 	ctx := context.Background()
 
-	buildWrappedScene := func(t *testing.T, seed map[string]isbngateway.BookMetadata) (*Facade, *throwingOnceIsbnLookupGateway) {
+	buildWrappedScene := func(t *testing.T, seed map[string]isbngateway.BookMetadata) (*catalog.Facade, *throwingOnceIsbnLookupGateway) {
 		t.Helper()
-		inner := isbngateway.NewInMemoryIsbnLookupGateway()
+		inner := isbngatewaymemory.NewGateway()
 		for isbn, metadata := range seed {
 			inner.Seed(isbn, metadata)
 		}
 		wrapped := &throwingOnceIsbnLookupGateway{inner: inner}
-		facade := NewFacadeWithOverrides(Overrides{
+		facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 			NewID:             sequentialIds("book"),
 			IsbnLookupGateway: wrapped,
 		})
@@ -754,7 +761,7 @@ func TestCatalogFacade_AddBook_GatewayFailures(t *testing.T) {
 		armed := errors.New("isbn service is down")
 		gateway.armFailureOnNextLookup(armed)
 
-		_, err := facade.AddBook(ctx, NewBookDto{
+		_, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Title:   "Client Title",
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
@@ -771,7 +778,7 @@ func TestCatalogFacade_AddBook_GatewayFailures(t *testing.T) {
 		armed := errors.New("isbn service is down")
 		gateway.armFailureOnNextLookup(armed)
 
-		_, err := facade.AddBook(ctx, NewBookDto{
+		_, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Title:   "Client Title",
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
@@ -799,7 +806,7 @@ func TestCatalogFacade_AddBook_GatewayFailures(t *testing.T) {
 		armed := errors.New("isbn service is down")
 		gateway.armFailureOnNextLookup(armed)
 
-		_, err := facade.AddBook(ctx, NewBookDto{
+		_, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
 		})
@@ -807,7 +814,7 @@ func TestCatalogFacade_AddBook_GatewayFailures(t *testing.T) {
 			t.Fatalf("first AddBook err = %v, want %v", err, armed)
 		}
 
-		book, err := facade.AddBook(ctx, NewBookDto{
+		book, err := facade.AddBook(ctx, catalog.NewBookDto{
 			Authors: []string{"Client Author"},
 			Isbn:    "978-0134685991",
 		})
@@ -833,9 +840,9 @@ func TestCatalogFacade_AddBook_GatewayFailures(t *testing.T) {
 func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("returns the cached BookDto on cache hit without consulting the repository", func(t *testing.T) {
+	t.Run("returns the cached catalog.BookDto on cache hit without consulting the repository", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
-		seeded := BookDto{
+		seeded := catalog.BookDto{
 			BookId:  "book-seeded",
 			Title:   "Seeded From Cache",
 			Authors: []string{"Cache Author"},
@@ -856,7 +863,7 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 
 	t.Run("cache miss + repo hit returns the repo book and populates the cache", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		gotPre, _ := cache.Get(ctx, "978-0134685991")
 		if gotPre != nil {
 			t.Fatalf("precondition: cache.Get(978-0134685991) = %+v, want nil", gotPre)
@@ -879,7 +886,7 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 		}
 	})
 
-	t.Run("cache miss + repo miss returns BookNotFoundError and does not negative-cache", func(t *testing.T) {
+	t.Run("cache miss + repo miss returns catalog.BookNotFoundError and does not negative-cache", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
 
 		_, err := facade.FindBook(ctx, "978-0000000000")
@@ -897,7 +904,7 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 	t.Run("AddBook does NOT populate the cache", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
 
-		mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
 		got, err := cache.Get(ctx, "978-0134685991")
 		if err != nil {
@@ -910,7 +917,7 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 
 	t.Run("two consecutive FindBook calls: first populates cache, second reads from cache", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		gotPre, _ := cache.Get(ctx, "978-0134685991")
 		if gotPre != nil {
 			t.Fatalf("precondition: cache should be empty, got %+v", gotPre)
@@ -941,8 +948,8 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 	})
 
 	t.Run("NewFacadeWithOverrides honours the BookCacheGateway override; default-built facade has empty cache", func(t *testing.T) {
-		overrideCache := bookcache.NewInMemoryBookCacheGateway()
-		seeded := BookDto{
+		overrideCache := bookcachememory.NewCache()
+		seeded := catalog.BookDto{
 			BookId:  "book-override",
 			Title:   "Override Hit",
 			Authors: []string{"Override Author"},
@@ -951,7 +958,7 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 		if err := overrideCache.Set(ctx, "978-0134685991", cacheBookDto(seeded)); err != nil {
 			t.Fatalf("overrideCache.Set failed: %v", err)
 		}
-		facadeWithOverride := NewFacadeWithOverrides(Overrides{
+		facadeWithOverride := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 			NewID:            sequentialIds("book"),
 			BookCacheGateway: overrideCache,
 		})
@@ -964,12 +971,12 @@ func TestCatalogFacade_FindBook_CacheReadThrough(t *testing.T) {
 			t.Errorf("FindBook with override returned %+v, want %+v", found, seeded)
 		}
 
-		facadeWithDefault := NewFacadeWithOverrides(Overrides{NewID: sequentialIds("book")})
+		facadeWithDefault := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{NewID: sequentialIds("book")})
 		_, err = facadeWithDefault.FindBook(ctx, "978-0000000000")
 		assertBookNotFound(t, err)
 	})
 
-	t.Run("FindBook returns *BookNotFoundError class on a miss", func(t *testing.T) {
+	t.Run("FindBook returns *catalog.BookNotFoundError class on a miss", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
 
 		_, err := facade.FindBook(ctx, "978-0000000000")
@@ -986,14 +993,14 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 
 	t.Run("updates only the title and preserves authors bookId and isbn", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		updated, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(WithUpdateTitle("New Title"), WithUpdateAuthorsNil()))
+		updated, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(catalog.WithUpdateTitle("New Title"), catalog.WithUpdateAuthorsNil()))
 		if err != nil {
 			t.Fatalf("UpdateBook failed: %v", err)
 		}
 
-		want := BookDto{
+		want := catalog.BookDto{
 			BookId:  added.BookId,
 			Title:   "New Title",
 			Authors: added.Authors,
@@ -1006,14 +1013,14 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 
 	t.Run("updates only the authors and preserves title bookId and isbn", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		updated, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(WithUpdateTitleNil(), WithUpdateAuthors([]string{"New Author A", "New Author B"})))
+		updated, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(catalog.WithUpdateTitleNil(), catalog.WithUpdateAuthors([]string{"New Author A", "New Author B"})))
 		if err != nil {
 			t.Fatalf("UpdateBook failed: %v", err)
 		}
 
-		want := BookDto{
+		want := catalog.BookDto{
 			BookId:  added.BookId,
 			Title:   added.Title,
 			Authors: []string{"New Author A", "New Author B"},
@@ -1026,17 +1033,17 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 
 	t.Run("updates title and authors atomically in a single returned DTO", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		updated, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(
-			WithUpdateTitle("Both Updated Title"),
-			WithUpdateAuthors([]string{"Both Updated Author"}),
+		updated, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(
+			catalog.WithUpdateTitle("Both Updated Title"),
+			catalog.WithUpdateAuthors([]string{"Both Updated Author"}),
 		))
 		if err != nil {
 			t.Fatalf("UpdateBook failed: %v", err)
 		}
 
-		want := BookDto{
+		want := catalog.BookDto{
 			BookId:  added.BookId,
 			Title:   "Both Updated Title",
 			Authors: []string{"Both Updated Author"},
@@ -1049,11 +1056,11 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 
 	t.Run("write-through cache: subsequent FindBook returns the updated DTO", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		updated, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(
-			WithUpdateTitle("Updated Title"),
-			WithUpdateAuthors([]string{"Updated Author"}),
+		updated, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(
+			catalog.WithUpdateTitle("Updated Title"),
+			catalog.WithUpdateAuthors([]string{"Updated Author"}),
 		))
 		if err != nil {
 			t.Fatalf("UpdateBook failed: %v", err)
@@ -1074,17 +1081,17 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 		}
 	})
 
-	t.Run("write-through cache: cache.Get returns the updated BookDto directly", func(t *testing.T) {
+	t.Run("write-through cache: cache.Get returns the updated catalog.BookDto directly", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		gotPre, _ := cache.Get(ctx, string(added.Isbn))
 		if gotPre != nil {
 			t.Fatalf("precondition: cache should be empty, got %+v", gotPre)
 		}
 
-		updated, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(
-			WithUpdateTitle("Cache Verified Title"),
-			WithUpdateAuthors([]string{"Cache Verified Author"}),
+		updated, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(
+			catalog.WithUpdateTitle("Cache Verified Title"),
+			catalog.WithUpdateAuthors([]string{"Cache Verified Author"}),
 		))
 		if err != nil {
 			t.Fatalf("UpdateBook failed: %v", err)
@@ -1100,7 +1107,7 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 		}
 	})
 
-	t.Run("returns BookNotFoundError for an unknown bookId and does not mutate the cache", func(t *testing.T) {
+	t.Run("returns catalog.BookNotFoundError for an unknown bookId and does not mutate the cache", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
 		unrelatedIsbn := "978-0135957059"
 		gotPre, _ := cache.Get(ctx, unrelatedIsbn)
@@ -1108,7 +1115,7 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 			t.Fatalf("precondition: cache should be empty, got %+v", gotPre)
 		}
 
-		_, err := facade.UpdateBook(ctx, "unknown-book-id", SampleUpdateBook(WithUpdateTitle("x"), WithUpdateAuthorsNil()))
+		_, err := facade.UpdateBook(ctx, "unknown-book-id", catalog.SampleUpdateBook(catalog.WithUpdateTitle("x"), catalog.WithUpdateAuthorsNil()))
 		assertBookNotFound(t, err)
 
 		got, err := cache.Get(ctx, unrelatedIsbn)
@@ -1120,36 +1127,36 @@ func TestCatalogFacade_UpdateBook(t *testing.T) {
 		}
 	})
 
-	t.Run("returns InvalidBookError for an empty patch", func(t *testing.T) {
+	t.Run("returns catalog.InvalidBookError for an empty patch", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		_, err := facade.UpdateBook(ctx, added.BookId, UpdateBookDto{})
+		_, err := facade.UpdateBook(ctx, added.BookId, catalog.UpdateBookDto{})
 		assertInvalidBook(t, err)
 	})
 
-	t.Run("returns InvalidBookError for a whitespace-only title", func(t *testing.T) {
+	t.Run("returns catalog.InvalidBookError for a whitespace-only title", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		_, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(WithUpdateTitle("   "), WithUpdateAuthorsNil()))
+		_, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(catalog.WithUpdateTitle("   "), catalog.WithUpdateAuthorsNil()))
 		assertInvalidBook(t, err)
 	})
 
-	t.Run("returns InvalidBookError for empty or all-blank authors slice", func(t *testing.T) {
+	t.Run("returns catalog.InvalidBookError for empty or all-blank authors slice", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
-		_, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(WithUpdateTitleNil(), WithUpdateAuthors([]string{})))
+		_, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(catalog.WithUpdateTitleNil(), catalog.WithUpdateAuthors([]string{})))
 		assertInvalidBook(t, err)
 
-		_, err = facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(WithUpdateTitleNil(), WithUpdateAuthors([]string{"", "   "})))
+		_, err = facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(catalog.WithUpdateTitleNil(), catalog.WithUpdateAuthors([]string{"", "   "})))
 		assertInvalidBook(t, err)
 	})
 
-	// The TS scenario "throws InvalidBookError when isbn is supplied" tests the
+	// The TS scenario "throws catalog.InvalidBookError when isbn is supplied" tests the
 	// case where a caller sneaks an `isbn` field into the patch object. In Go
-	// the equivalent enforcement is compile-time: UpdateBookDto has no Isbn
+	// the equivalent enforcement is compile-time: catalog.UpdateBookDto has no catalog.Isbn
 	// field (see types.go line 76). The "isbn cannot be updated" enforcement
 	// at the HTTP DTO mapping layer is Slice 3's responsibility.
 }
@@ -1163,16 +1170,16 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 
 	t.Run("resolves without error for an existing book", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
 		if err := facade.DeleteBook(ctx, added.BookId); err != nil {
 			t.Errorf("DeleteBook returned err: %v, want nil", err)
 		}
 	})
 
-	t.Run("makes FindBook(isbn) return BookNotFoundError after deletion", func(t *testing.T) {
+	t.Run("makes FindBook(isbn) return catalog.BookNotFoundError after deletion", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 
 		if err := facade.DeleteBook(ctx, added.BookId); err != nil {
 			t.Fatalf("DeleteBook failed: %v", err)
@@ -1184,7 +1191,7 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 
 	t.Run("leaves cache empty after deleting a never-cached book", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		gotPre, _ := cache.Get(ctx, string(added.Isbn))
 		if gotPre != nil {
 			t.Fatalf("precondition: cache should be empty, got %+v", gotPre)
@@ -1205,7 +1212,7 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 
 	t.Run("evicts a previously-seeded cache entry on delete", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		if err := cache.Set(ctx, string(added.Isbn), cacheBookDto(added)); err != nil {
 			t.Fatalf("cache.Set failed: %v", err)
 		}
@@ -1223,14 +1230,14 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 		}
 	})
 
-	t.Run("returns BookNotFoundError for an unknown bookId and does not modify the cache", func(t *testing.T) {
+	t.Run("returns catalog.BookNotFoundError for an unknown bookId and does not modify the cache", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
 		unrelatedIsbn := "978-0135957059"
-		unrelated := BookDto{
+		unrelated := catalog.BookDto{
 			BookId:  "book-unrelated",
 			Title:   "Unrelated",
 			Authors: []string{"Unrelated Author"},
-			Isbn:    Isbn(unrelatedIsbn),
+			Isbn:    catalog.Isbn(unrelatedIsbn),
 		}
 		if err := cache.Set(ctx, unrelatedIsbn, cacheBookDto(unrelated)); err != nil {
 			t.Fatalf("cache.Set failed: %v", err)
@@ -1251,8 +1258,8 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 
 	t.Run("only evicts the deleted book and leaves other cache entries intact", func(t *testing.T) {
 		cache, facade := buildCacheScene(t)
-		bookA := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
-		bookB := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0135957059"))
+		bookA := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
+		bookB := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0135957059"))
 		if err := cache.Set(ctx, string(bookA.Isbn), cacheBookDto(bookA)); err != nil {
 			t.Fatalf("cache.Set(A) failed: %v", err)
 		}
@@ -1281,9 +1288,9 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 		}
 	})
 
-	t.Run("returns BookNotFoundError on a second delete of the same bookId", func(t *testing.T) {
+	t.Run("returns catalog.BookNotFoundError on a second delete of the same bookId", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		if err := facade.DeleteBook(ctx, added.BookId); err != nil {
 			t.Fatalf("first DeleteBook failed: %v", err)
 		}
@@ -1294,12 +1301,12 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 
 	t.Run("allows AddBook with the same isbn after DeleteBook", func(t *testing.T) {
 		_, facade := buildCacheScene(t)
-		original := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		original := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		if err := facade.DeleteBook(ctx, original.BookId); err != nil {
 			t.Fatalf("DeleteBook failed: %v", err)
 		}
 
-		recreated, err := facade.AddBook(ctx, SampleNewBookWithIsbn("978-0134685991"))
+		recreated, err := facade.AddBook(ctx, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		if err != nil {
 			t.Fatalf("AddBook recreate failed: %v", err)
 		}
@@ -1326,11 +1333,11 @@ func TestCatalogFacade_DeleteBook(t *testing.T) {
 func TestCatalogFacade_CacheGatewayFailures(t *testing.T) {
 	ctx := context.Background()
 
-	buildScene := func(t *testing.T) (*throwingOnceBookCacheGateway, *Facade) {
+	buildScene := func(t *testing.T) (*throwingOnceBookCacheGateway, *catalog.Facade) {
 		t.Helper()
-		inner := bookcache.NewInMemoryBookCacheGateway()
+		inner := bookcachememory.NewCache()
 		throwing := &throwingOnceBookCacheGateway{inner: inner}
-		facade := NewFacadeWithOverrides(Overrides{
+		facade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 			BookCacheGateway: throwing,
 			NewID:            sequentialIds("book"),
 		})
@@ -1339,7 +1346,7 @@ func TestCatalogFacade_CacheGatewayFailures(t *testing.T) {
 
 	t.Run("cache.Set fails on FindBook miss-then-populate; next FindBook recovers", func(t *testing.T) {
 		throwing, facade := buildScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		armed := errors.New("redis SET failed")
 		throwing.armFailureOnNextSet(armed)
 
@@ -1359,7 +1366,7 @@ func TestCatalogFacade_CacheGatewayFailures(t *testing.T) {
 
 	t.Run("cache.Get fails on FindBook; next FindBook recovers", func(t *testing.T) {
 		throwing, facade := buildScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		armed := errors.New("redis GET failed")
 		throwing.armFailureOnNextGet(armed)
 
@@ -1379,11 +1386,11 @@ func TestCatalogFacade_CacheGatewayFailures(t *testing.T) {
 
 	t.Run("cache.Set fails during UpdateBook write-through; repo is source of truth", func(t *testing.T) {
 		throwing, facade := buildScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		armed := errors.New("redis SET failed mid-update")
 		throwing.armFailureOnNextSet(armed)
 
-		_, err := facade.UpdateBook(ctx, added.BookId, SampleUpdateBook(WithUpdateTitle("Updated Title"), WithUpdateAuthorsNil()))
+		_, err := facade.UpdateBook(ctx, added.BookId, catalog.SampleUpdateBook(catalog.WithUpdateTitle("Updated Title"), catalog.WithUpdateAuthorsNil()))
 		if !errors.Is(err, armed) {
 			t.Errorf("UpdateBook err = %v, want %v", err, armed)
 		}
@@ -1402,7 +1409,7 @@ func TestCatalogFacade_CacheGatewayFailures(t *testing.T) {
 
 	t.Run("cache.Evict fails during DeleteBook; repo delete is durable", func(t *testing.T) {
 		throwing, facade := buildScene(t)
-		added := mustAddBook(t, facade, SampleNewBookWithIsbn("978-0134685991"))
+		added := mustAddBook(t, facade, catalog.SampleNewBookWithIsbn("978-0134685991"))
 		armed := errors.New("redis EVICT failed")
 		throwing.armFailureOnNextEvict(armed)
 
@@ -1488,43 +1495,43 @@ func (c *throwingOnceBookCacheGateway) Evict(ctx context.Context, isbn string) e
 	return c.inner.Evict(ctx, isbn)
 }
 
-// recordingRepository wraps a real Repository and counts ListBooksByIds calls
+// recordingRepository wraps a real catalog.Repository and counts ListBooksByIds calls
 // so the GetBooks([]) short-circuit can be asserted as "repo not touched."
 // Mirrors the spec-local recording pattern from the TS source.
 type recordingRepository struct {
-	inner                   Repository
+	inner                   catalog.Repository
 	listBooksByIdsCallCount int
 }
 
-func (r *recordingRepository) SaveBook(ctx context.Context, book BookDto) error {
+func (r *recordingRepository) SaveBook(ctx context.Context, book catalog.BookDto) error {
 	return r.inner.SaveBook(ctx, book)
 }
 
-func (r *recordingRepository) FindBookById(ctx context.Context, bookId BookId) (*BookDto, error) {
+func (r *recordingRepository) FindBookById(ctx context.Context, bookId catalog.BookId) (*catalog.BookDto, error) {
 	return r.inner.FindBookById(ctx, bookId)
 }
 
-func (r *recordingRepository) FindBookByIsbn(ctx context.Context, isbn Isbn) (*BookDto, error) {
+func (r *recordingRepository) FindBookByIsbn(ctx context.Context, isbn catalog.Isbn) (*catalog.BookDto, error) {
 	return r.inner.FindBookByIsbn(ctx, isbn)
 }
 
-func (r *recordingRepository) ListBooks(ctx context.Context) ([]BookDto, error) {
+func (r *recordingRepository) ListBooks(ctx context.Context) ([]catalog.BookDto, error) {
 	return r.inner.ListBooks(ctx)
 }
 
-func (r *recordingRepository) ListBooksByIds(ctx context.Context, bookIds []BookId) ([]BookDto, error) {
+func (r *recordingRepository) ListBooksByIds(ctx context.Context, bookIds []catalog.BookId) ([]catalog.BookDto, error) {
 	r.listBooksByIdsCallCount++
 	return r.inner.ListBooksByIds(ctx, bookIds)
 }
 
-func (r *recordingRepository) DeleteBook(ctx context.Context, bookId BookId) error {
+func (r *recordingRepository) DeleteBook(ctx context.Context, bookId catalog.BookId) error {
 	return r.inner.DeleteBook(ctx, bookId)
 }
 
-func (r *recordingRepository) SaveCopy(ctx context.Context, copy CopyDto) error {
+func (r *recordingRepository) SaveCopy(ctx context.Context, copy catalog.CopyDto) error {
 	return r.inner.SaveCopy(ctx, copy)
 }
 
-func (r *recordingRepository) FindCopyById(ctx context.Context, copyId CopyId) (*CopyDto, error) {
+func (r *recordingRepository) FindCopyById(ctx context.Context, copyId catalog.CopyId) (*catalog.CopyDto, error) {
 	return r.inner.FindCopyById(ctx, copyId)
 }

@@ -2,11 +2,16 @@
 // scenario port of apps/library/src/fines/fines.facade.spec.ts from the
 // source TypeScript repository.
 //
+// Lives in package fines_test (external test package) so it can import
+// the in-memory adapter from internal/fines/driven/memory without
+// creating an import cycle. Every symbol is qualified with the fines.*
+// prefix.
+//
 // Stdlib testing only — errors.As for typed-error assertions, no testify,
 // no mock library. The scene helper wires real *lending.Facade +
 // *membership.Facade + *catalog.Facade so the fines facade reads the
 // in-memory state the test seeds via real cross-module calls.
-package fines
+package fines_test
 
 import (
 	"context"
@@ -20,9 +25,15 @@ import (
 
 	"github.com/akshayvadher/test-n-design-go/internal/accesscontrol"
 	"github.com/akshayvadher/test-n-design-go/internal/catalog"
+	catalogmemory "github.com/akshayvadher/test-n-design-go/internal/catalog/driven/memory"
+	"github.com/akshayvadher/test-n-design-go/internal/fines"
+	finesmemory "github.com/akshayvadher/test-n-design-go/internal/fines/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/lending"
+	lendingmemory "github.com/akshayvadher/test-n-design-go/internal/lending/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/membership"
+	membershipmemory "github.com/akshayvadher/test-n-design-go/internal/membership/driven/memory"
 	"github.com/akshayvadher/test-n-design-go/internal/shared/events"
+	eventsmemory "github.com/akshayvadher/test-n-design-go/internal/shared/events/memory"
 )
 
 // -----------------------------------------------------------------------------
@@ -104,21 +115,21 @@ func (c *collectedEvents) types() []string {
 // facades (for seeding loans/members/copies), the in-memory bus and the
 // captured-events slice.
 type scene struct {
-	fines      *Facade
+	fines      *fines.Facade
 	lending    *lending.Facade
 	membership *membership.Facade
 	catalog    *catalog.Facade
-	repository *InMemoryFineRepository
-	bus        *events.InMemoryEventBus
+	repository *finesmemory.Repository
+	bus        *eventsmemory.Bus
 	collected  *collectedEvents
 	clock      *mutableClock
-	config     FinesConfig
+	config     fines.FinesConfig
 }
 
 // sceneOpts lets a test override the FinesConfig used to build the scene
 // (auto-suspend tests need a low threshold).
 type sceneOpts struct {
-	Config *FinesConfig
+	Config *fines.FinesConfig
 }
 
 // buildScene constructs a fresh scene. Both the lending facade and the
@@ -133,17 +144,17 @@ func buildScene(t *testing.T, opts ...func(*sceneOpts)) *scene {
 
 	logger := silentLogger()
 	clock := newMutableClock(fixedNow)
-	bus := events.NewInMemoryEventBus(logger)
+	bus := eventsmemory.NewBus(logger)
 
-	catalogFacade := catalog.NewFacadeWithOverrides(catalog.Overrides{
+	catalogFacade := catalogmemory.NewFacadeWithOverrides(catalogmemory.Overrides{
 		NewID:  sequentialIds("cat"),
 		Logger: logger,
 	})
-	membershipFacade := membership.NewFacadeWithOverrides(membership.Overrides{
+	membershipFacade := membershipmemory.NewFacadeWithOverrides(membershipmemory.Overrides{
 		NewID:  sequentialIds("mem"),
 		Logger: logger,
 	})
-	lendingFacade := lending.NewFacadeWithOverrides(lending.Overrides{
+	lendingFacade := lendingmemory.NewFacadeWithOverrides(lendingmemory.Overrides{
 		Catalog:    catalogFacade,
 		Membership: membershipFacade,
 		Bus:        bus,
@@ -152,12 +163,12 @@ func buildScene(t *testing.T, opts ...func(*sceneOpts)) *scene {
 		Logger:     logger,
 	})
 
-	repo := NewInMemoryFineRepository()
-	finesConfig := defaultConfig()
+	repo := finesmemory.NewRepository()
+	finesConfig := fines.DefaultConfig()
 	if cfg.Config != nil {
 		finesConfig = *cfg.Config
 	}
-	finesFacade := NewFacadeWithOverrides(Overrides{
+	finesFacade := finesmemory.NewFacadeWithOverrides(finesmemory.Overrides{
 		Lending:    lendingFacade,
 		Membership: membershipFacade,
 		Repository: repo,
@@ -462,7 +473,7 @@ func TestFinesFacade_ProcessOverdueLoans_AssessesDistinctMembers(t *testing.T) {
 
 func TestFinesFacade_AutoSuspend_AtThreshold(t *testing.T) {
 	ctx := context.Background()
-	low := FinesConfig{DailyRateCents: 25, SuspensionThresholdCents: 100}
+	low := fines.FinesConfig{DailyRateCents: 25, SuspensionThresholdCents: 100}
 	s := buildScene(t, func(opts *sceneOpts) { opts.Config = &low })
 
 	_, copyDto := seedAvailableCopy(t, s, 1)
@@ -487,7 +498,7 @@ func TestFinesFacade_AutoSuspend_AtThreshold(t *testing.T) {
 	if len(suspendedEvents) != 1 {
 		t.Fatalf("MemberAutoSuspended count: got %d, want 1", len(suspendedEvents))
 	}
-	evt := suspendedEvents[0].(MemberAutoSuspended)
+	evt := suspendedEvents[0].(fines.MemberAutoSuspended)
 	if evt.MemberId != alice.MemberId {
 		t.Errorf("MemberAutoSuspended.MemberId: got %q, want %q", evt.MemberId, alice.MemberId)
 	}
@@ -504,7 +515,7 @@ func TestFinesFacade_AutoSuspend_AtThreshold(t *testing.T) {
 
 func TestFinesFacade_AutoSuspend_SkippedUnderThreshold(t *testing.T) {
 	ctx := context.Background()
-	high := FinesConfig{DailyRateCents: 25, SuspensionThresholdCents: 10_000}
+	high := fines.FinesConfig{DailyRateCents: 25, SuspensionThresholdCents: 10_000}
 	s := buildScene(t, func(opts *sceneOpts) { opts.Config = &high })
 
 	_, copyDto := seedAvailableCopy(t, s, 1)
@@ -530,7 +541,7 @@ func TestFinesFacade_AutoSuspend_SkippedUnderThreshold(t *testing.T) {
 
 func TestFinesFacade_AutoSuspend_SkippedWhenAlreadySuspended(t *testing.T) {
 	ctx := context.Background()
-	low := FinesConfig{DailyRateCents: 25, SuspensionThresholdCents: 100}
+	low := fines.FinesConfig{DailyRateCents: 25, SuspensionThresholdCents: 100}
 	s := buildScene(t, func(opts *sceneOpts) { opts.Config = &low })
 
 	_, copyDto := seedAvailableCopy(t, s, 1)
@@ -579,11 +590,11 @@ func TestFinesFacade_FindFine_Happy(t *testing.T) {
 func TestFinesFacade_FindFine_NotFound(t *testing.T) {
 	ctx := context.Background()
 	s := buildScene(t)
-	_, err := s.fines.FindFine(ctx, FineId("missing"))
+	_, err := s.fines.FindFine(ctx, fines.FineId("missing"))
 	if err == nil {
 		t.Fatal("FindFine: got nil, want *FineNotFoundError")
 	}
-	var notFound *FineNotFoundError
+	var notFound *fines.FineNotFoundError
 	if !errors.As(err, &notFound) {
 		t.Errorf("FindFine error: got %T(%v), want *FineNotFoundError", err, err)
 	}
@@ -640,7 +651,7 @@ func TestFinesFacade_PayFine_AlreadyPaid(t *testing.T) {
 	if err == nil {
 		t.Fatal("PayFine (second): got nil, want *FineAlreadyPaidError")
 	}
-	var alreadyPaid *FineAlreadyPaidError
+	var alreadyPaid *fines.FineAlreadyPaidError
 	if !errors.As(err, &alreadyPaid) {
 		t.Errorf("PayFine error: got %T(%v), want *FineAlreadyPaidError", err, err)
 	}
@@ -649,11 +660,11 @@ func TestFinesFacade_PayFine_AlreadyPaid(t *testing.T) {
 func TestFinesFacade_PayFine_NotFound(t *testing.T) {
 	ctx := context.Background()
 	s := buildScene(t)
-	_, err := s.fines.PayFine(ctx, FineId("missing"))
+	_, err := s.fines.PayFine(ctx, fines.FineId("missing"))
 	if err == nil {
 		t.Fatal("PayFine: got nil, want *FineNotFoundError")
 	}
-	var notFound *FineNotFoundError
+	var notFound *fines.FineNotFoundError
 	if !errors.As(err, &notFound) {
 		t.Errorf("PayFine error: got %T(%v), want *FineNotFoundError", err, err)
 	}
