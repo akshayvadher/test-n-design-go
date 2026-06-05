@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/akshayvadher/test-n-design-go/internal/app"
+	"github.com/akshayvadher/test-n-design-go/internal/shared/db"
 )
 
 // readHeaderTimeout caps the time the HTTP server waits for request headers.
@@ -48,6 +49,18 @@ func main() {
 	}
 
 	logger := buildLogger(cfg, os.Stdout)
+
+	// `library migrate` applies pending schema migrations in-process and exits.
+	// k8s runs this as the initContainer using the SAME image as the server —
+	// no atlas CLI, no separate migrations image. Any other arg (or none) boots
+	// the HTTP server.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := runMigrate(cfg, logger); err != nil {
+			logger.Error("migrate", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		return
+	}
 
 	ctx := context.Background()
 	wired, err := app.Wire(ctx, app.Deps{
@@ -71,6 +84,20 @@ func main() {
 		logger.Error("server shutdown failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+// runMigrate opens a bun pool against the configured DATABASE_URL, applies all
+// pending embedded migrations in-process via db.RunBunMigrations, then closes
+// the pool. It is the `library migrate` subcommand's whole body — the binary
+// exits 0 on success, 1 on failure (handled by the caller in main).
+func runMigrate(cfg *Config, logger *slog.Logger) error {
+	ctx := context.Background()
+	bunDB, err := db.NewBunDB(ctx, cfg.DatabaseURL, db.PoolConfig{}, logger)
+	if err != nil {
+		return fmt.Errorf("open db for migrate: %w", err)
+	}
+	defer func() { _ = bunDB.Close() }()
+	return db.RunBunMigrations(ctx, bunDB, logger)
 }
 
 // buildLogger constructs the single *slog.Logger used by every collaborator.

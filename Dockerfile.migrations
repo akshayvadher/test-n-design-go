@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1.7
+#
+# Migrations image for the library service.
+#
+# A thin layer on top of the official atlas CLI image: it bundles the versioned
+# migration directory (the 5 .sql files + atlas.sum integrity manifest) so the
+# image is fully self-contained. The Kubernetes Deployment runs this as an
+# initContainer that applies pending migrations before the app container starts.
+#
+# atlas.sum travels with the SQL files, so the directory's integrity is verified
+# at apply time — a tampered or out-of-order migration aborts the run.
+#
+# The atlas tag is pinned to an exact release (not `latest`) so a new upstream
+# version can never silently change migration behaviour under you. To go fully
+# immutable on a single-arch cluster, replace the tag with a digest:
+#   linux/amd64: arigaio/atlas@sha256:a5714425df99e90956814c8ca4ac9117e55e43a365d9aac94457309ddc529e02
+#   linux/arm64: arigaio/atlas@sha256:e26b38c9dda61e24a6bbf5871f6fcbf53d9769a63ec446899cd38ea36b137604
+# (A per-arch digest pins the architecture too — keep the tag for multi-arch.)
+#
+# Build:
+#   podman build -f Dockerfile.migrations -t test-n-design-go-migrations:latest .
+#
+# Run standalone (against an external Postgres):
+#   podman run --rm \
+#     test-n-design-go-migrations:latest \
+#     migrate apply \
+#       --url 'postgres://library:library@host.docker.internal:5432/library?sslmode=disable' \
+#       --dir 'file:///migrations'
+
+FROM arigaio/atlas:1.2.0
+
+# The whole versioned migration set, including atlas.sum.
+COPY migrations/ /migrations/
+
+# Entrypoint is `atlas`; the Deployment supplies the `migrate apply ...` args.
